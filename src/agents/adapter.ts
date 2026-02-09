@@ -12,6 +12,7 @@ export interface AgentRunOptions {
   cwd: string;
   contextFiles?: string[];
   timeout?: number;
+  logFile?: string;
 }
 
 export interface AgentRunResult {

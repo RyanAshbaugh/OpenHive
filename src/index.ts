@@ -42,7 +42,11 @@ export { mergeWorktree } from './git/merge.js';
 export type { ProjectSpec, ServeConfig, TaskSpec, VerifyConfig, ScreenshotSpec } from './specs/schema.js';
 export { parseSpec, validateSpec, SpecParseError } from './specs/parser.js';
 export { computeWaves, runSpec, CycleError } from './specs/runner.js';
-export type { Wave, SpecRunResult, WaveResult } from './specs/runner.js';
+export type { Wave, SpecRunResult, WaveResult, SpecRunOptions } from './specs/runner.js';
+
+// Session
+export type { LaunchSession, SessionWave, SessionTask } from './specs/session.js';
+export { writeSession, readSession, clearSession } from './specs/session.js';
 
 // Verification
 export { runVerification } from './verify/runner.js';

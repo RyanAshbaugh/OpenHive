@@ -13,6 +13,7 @@ export interface Task {
   stdout?: string;
   stderr?: string;
   durationMs?: number;
+  logFile?: string;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;

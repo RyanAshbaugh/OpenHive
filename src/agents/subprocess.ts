@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createWriteStream, type WriteStream } from 'node:fs';
 import type { AgentRunOptions, AgentRunResult } from './adapter.js';
 import { logger } from '../utils/logger.js';
 
@@ -26,12 +27,19 @@ export function runAgent(
     let stdout = '';
     let stderr = '';
 
+    let logStream: WriteStream | null = null;
+    if (options.logFile) {
+      logStream = createWriteStream(options.logFile, { flags: 'a' });
+    }
+
     child.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
+      logStream?.write(data);
     });
 
     child.stderr?.on('data', (data: Buffer) => {
       stderr += data.toString();
+      logStream?.write(data);
     });
 
     const timer = options.timeout
@@ -41,8 +49,13 @@ export function runAgent(
         }, options.timeout)
       : null;
 
-    child.on('close', (code) => {
+    const cleanup = () => {
       if (timer) clearTimeout(timer);
+      logStream?.end();
+    };
+
+    child.on('close', (code) => {
+      cleanup();
       resolve({
         exitCode: code ?? 1,
         stdout,
@@ -52,7 +65,7 @@ export function runAgent(
     });
 
     child.on('error', (err) => {
-      if (timer) clearTimeout(timer);
+      cleanup();
       resolve({
         exitCode: 1,
         stdout,

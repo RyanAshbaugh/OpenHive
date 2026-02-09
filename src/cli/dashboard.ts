@@ -1,53 +1,14 @@
-import chalk, { type ChalkInstance } from 'chalk';
+import chalk from 'chalk';
 import type { AppContext } from './context.js';
-
-// ─── Theme ──────────────────────────────────────────────────────────────────
-
-const theme = {
-  border: chalk.gray,
-  borderFocus: chalk.cyan,
-  title: chalk.bold.white,
-  header: chalk.bold.cyan,
-  dim: chalk.dim,
-  success: chalk.green,
-  warning: chalk.yellow,
-  error: chalk.red,
-  info: chalk.blue,
-  providers: {
-    anthropic: chalk.hex('#D4A574'),
-    openai: chalk.hex('#74AA9C'),
-    google: chalk.hex('#4285F4'),
-    cursor: chalk.hex('#FF6B6B'),
-  } as Record<string, ChalkInstance>,
-  gradient(pct: number): ChalkInstance {
-    if (pct < 0.6) return chalk.green;
-    if (pct < 0.85) return chalk.yellow;
-    return chalk.red;
-  },
-};
+import {
+  theme, BOX, progressBar, statusDot,
+  ScreenBuffer, stripAnsi, padRight, renderPanel,
+  runTuiLoop,
+} from './tui.js';
 
 // ─── Unicode Helpers ────────────────────────────────────────────────────────
 
-const BOX = { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' } as const;
-const BLOCKS = '░▒▓█';
-const FRACTIONAL = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 const SPARK = '▁▂▃▄▅▆▇█';
-
-function progressBar(value: number, max: number, width: number): string {
-  if (max <= 0) {
-    // No limit — just show count as dim bar
-    const pct = Math.min(value / Math.max(value, 1), 1);
-    const filled = Math.min(value, width);
-    return chalk.dim('█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled)));
-  }
-  const pct = Math.min(value / max, 1);
-  const total = pct * width;
-  const full = Math.floor(total);
-  const frac = Math.round((total - full) * 7);
-  const empty = width - full - (frac > 0 ? 1 : 0);
-  const color = theme.gradient(pct);
-  return color('█'.repeat(full) + (frac > 0 ? FRACTIONAL[frac] : '')) + chalk.gray('░'.repeat(Math.max(0, empty)));
-}
 
 function sparkline(values: number[]): string {
   if (values.length === 0) return '';
@@ -56,132 +17,6 @@ function sparkline(values: number[]): string {
     const idx = Math.round((v / max) * 7);
     return chalk.cyan(SPARK[idx]);
   }).join('');
-}
-
-function statusDot(status: string): string {
-  switch (status) {
-    case 'running': return theme.info('●');
-    case 'completed': return theme.success('○');
-    case 'failed': return theme.error('✗');
-    case 'pending': case 'queued': return theme.warning('●');
-    case 'cancelled': return theme.dim('○');
-    default: return theme.dim('○');
-  }
-}
-
-// ─── Screen Buffer ──────────────────────────────────────────────────────────
-
-class ScreenBuffer {
-  private lines: string[];
-  private cols: number;
-  private rows: number;
-
-  constructor(cols: number, rows: number) {
-    this.cols = cols;
-    this.rows = rows;
-    this.lines = Array(rows).fill('');
-  }
-
-  /** Write text at (row, col). row/col are 0-based. */
-  write(row: number, col: number, text: string): void {
-    if (row < 0 || row >= this.rows) return;
-    const line = this.lines[row];
-    // Pad if needed
-    const visible = stripAnsi(line);
-    if (visible.length < col) {
-      this.lines[row] = line + ' '.repeat(col - visible.length) + text;
-    } else {
-      // Overwrite at position — we work with the raw string
-      // For simplicity, build line from pieces
-      const before = sliceVisible(line, 0, col);
-      const after = sliceVisible(line, col + stripAnsi(text).length);
-      this.lines[row] = before + text + after;
-    }
-  }
-
-  flush(): string {
-    return this.lines.join('\n');
-  }
-}
-
-/** Strip ANSI escape codes to get visible length */
-function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*m/g, '');
-}
-
-/** Slice a styled string by visible character positions */
-function sliceVisible(str: string, start: number, end?: number): string {
-  // eslint-disable-next-line no-control-regex
-  const ansiRe = /\x1b\[[0-9;]*m/g;
-  let result = '';
-  let visIdx = 0;
-  let lastIdx = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = ansiRe.exec(str)) !== null) {
-    const textBefore = str.slice(lastIdx, match.index);
-    for (const ch of textBefore) {
-      if (visIdx >= start && (end === undefined || visIdx < end)) {
-        result += ch;
-      }
-      visIdx++;
-    }
-    // Always include ANSI codes that are within range
-    if (visIdx >= start && (end === undefined || visIdx <= (end ?? Infinity))) {
-      result += match[0];
-    }
-    lastIdx = match.index + match[0].length;
-  }
-  // Remaining text
-  const remaining = str.slice(lastIdx);
-  for (const ch of remaining) {
-    if (visIdx >= start && (end === undefined || visIdx < end)) {
-      result += ch;
-    }
-    visIdx++;
-  }
-  return result;
-}
-
-function pad(text: string, width: number): string {
-  const vis = stripAnsi(text).length;
-  if (vis >= width) return sliceVisible(text, 0, width);
-  return text + ' '.repeat(width - vis);
-}
-
-function padRight(text: string, width: number): string {
-  return pad(text, width);
-}
-
-// ─── Panel Rendering ────────────────────────────────────────────────────────
-
-function renderPanel(
-  buf: ScreenBuffer,
-  row: number,
-  col: number,
-  width: number,
-  height: number,
-  title: string,
-  content: string[],
-  focused = false,
-): void {
-  const border = focused ? theme.borderFocus : theme.border;
-  const innerW = width - 2;
-
-  // Top border
-  const titleStr = title ? ` ${title} ` : '';
-  const topLine = border(BOX.tl + BOX.h) + theme.title(titleStr) + border(BOX.h.repeat(Math.max(0, innerW - stripAnsi(titleStr).length)) + BOX.tr);
-  buf.write(row, col, topLine);
-
-  // Content rows
-  for (let i = 0; i < height - 2; i++) {
-    const line = i < content.length ? content[i] : '';
-    buf.write(row + 1 + i, col, border(BOX.v) + ' ' + padRight(line, innerW - 1) + border(BOX.v));
-  }
-
-  // Bottom border
-  buf.write(row + height - 1, col, border(BOX.bl + BOX.h.repeat(innerW) + BOX.br));
 }
 
 // ─── Dashboard Composer ─────────────────────────────────────────────────────
@@ -294,7 +129,7 @@ function renderDashboard(
     poolLines.pop();
   }
   const poolPanelH = poolLines.length + 2;
-  const availRows = rows - curRow - 2; // leave room for recent tasks + bottom
+  const availRows = rows - curRow - 2;
   const poolH = Math.min(poolPanelH, Math.floor(availRows * 0.55));
   renderPanel(buf, curRow, innerLeft, innerW, poolH, 'Pool Usage', poolLines);
 
@@ -329,89 +164,27 @@ function renderDashboard(
 // ─── Main Loop ──────────────────────────────────────────────────────────────
 
 export async function runDashboard(ctx: AppContext): Promise<void> {
-  const stdout = process.stdout;
-  if (!stdout.isTTY) {
-    console.error('Dashboard requires a TTY terminal.');
-    process.exit(1);
-  }
-
-  // Enter alternate screen, hide cursor
-  stdout.write('\x1b[?1049h');
-  stdout.write('\x1b[?25l');
-
-  let running = true;
   let agents = await gatherAgents(ctx);
 
-  // Enable raw mode for keypress
-  const stdin = process.stdin;
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.setEncoding('utf-8');
-
-  const cleanup = () => {
-    running = false;
-    // Restore terminal
-    stdout.write('\x1b[?25h'); // show cursor
-    stdout.write('\x1b[?1049l'); // leave alternate screen
-    stdin.setRawMode(false);
-    stdin.pause();
-  };
-
-  stdin.on('data', async (key: string) => {
-    if (key === 'q' || key === '\x03') { // q or Ctrl+C
-      cleanup();
-      process.exit(0);
-    }
-    if (key === 'r') {
-      agents = await gatherAgents(ctx);
-      paint();
-    }
-  });
-
-  process.on('SIGINT', () => {
-    cleanup();
-    process.exit(0);
-  });
-
-  const paint = () => {
-    const cols = stdout.columns || 80;
-    const rows = stdout.rows || 24;
-    const frame = renderDashboard(ctx, agents, cols, rows);
-    stdout.write('\x1b[H'); // cursor to top-left
-    stdout.write(frame);
-  };
-
-  // Handle resize
-  stdout.on('resize', paint);
-
-  // Render loop
-  const tick = async () => {
-    if (!running) return;
-    // Reload data from disk
-    try {
-      const tasks = await ctx.storage.loadAll();
-      ctx.queue.loadAll(tasks);
-      await ctx.poolTracker.reloadUsageStore();
-    } catch {
-      // Ignore load errors in dashboard
-    }
-    paint();
-  };
-
-  // Initial paint
-  await tick();
-
-  // 1-second interval
-  const interval = setInterval(tick, 1000);
-
-  // Keep alive until cleanup
-  await new Promise<void>((resolve) => {
-    const check = setInterval(() => {
-      if (!running) {
-        clearInterval(interval);
-        clearInterval(check);
-        resolve();
+  await runTuiLoop({
+    render: (cols, rows) => renderDashboard(ctx, agents, cols, rows),
+    onKey: async (key) => {
+      if (key === 'q') {
+        process.exit(0);
       }
-    }, 100);
+      if (key === 'r') {
+        agents = await gatherAgents(ctx);
+      }
+    },
+    onTick: async () => {
+      try {
+        const tasks = await ctx.storage.loadAll();
+        ctx.queue.loadAll(tasks);
+        await ctx.poolTracker.reloadUsageStore();
+      } catch {
+        // Ignore load errors in dashboard
+      }
+    },
+    intervalMs: 1000,
   });
 }

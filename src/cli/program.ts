@@ -10,6 +10,7 @@ import { registerLogsCommand } from './commands/logs.js';
 import { registerReviewCommands } from './commands/review.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerLaunchCommand } from './commands/launch.js';
+import { registerWatchCommand } from './commands/watch.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -36,6 +37,7 @@ function createProgram(): Command {
   registerReviewCommands(program);
   registerDashboardCommand(program);
   registerLaunchCommand(program);
+  registerWatchCommand(program);
 
   return program;
 }

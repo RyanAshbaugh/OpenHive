@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import type { OpenHiveConfig } from '../config/schema.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TaskQueue } from '../tasks/queue.js';
@@ -45,12 +47,18 @@ export class Scheduler {
       logger.warn(`Worktree creation failed, running in current directory: ${err}`);
     }
 
+    // Set up log file
+    const logsDir = join(process.cwd(), '.openhive', 'logs');
+    await mkdir(logsDir, { recursive: true });
+    const logFile = join(logsDir, `${task.id}.log`);
+
     // Update task status
     this.queue.update(task.id, {
       status: 'running',
       agent: agent.name,
       worktreePath,
       worktreeBranch,
+      logFile,
       startedAt: new Date().toISOString(),
     });
     await this.storage.save(this.queue.get(task.id)!);
@@ -65,6 +73,7 @@ export class Scheduler {
         prompt: task.prompt,
         cwd: worktreePath,
         contextFiles: task.contextFiles,
+        logFile,
       });
 
       const isRateLimit = this.poolTracker.isRateLimitSignal(result.exitCode, result.stdout + result.stderr);

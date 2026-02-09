@@ -5,6 +5,8 @@ import type { TaskStorage } from '../tasks/storage.js';
 import { createTask } from '../tasks/task.js';
 import { generateId } from '../utils/id.js';
 import { logger } from '../utils/logger.js';
+import type { LaunchSession } from './session.js';
+import { writeSession } from './session.js';
 
 export class CycleError extends Error {
   constructor(message: string) {
@@ -70,12 +72,17 @@ export interface WaveResult {
   failed: string[];
 }
 
+export interface SpecRunOptions {
+  sessionDir?: string;
+}
+
 /** Run a project spec through wave-based dispatch */
 export async function runSpec(
   spec: ProjectSpec,
   scheduler: Scheduler,
   queue: TaskQueue,
   storage: TaskStorage,
+  options?: SpecRunOptions,
 ): Promise<SpecRunResult> {
   const waves = computeWaves(spec.tasks);
   const taskMap = new Map(spec.tasks.map(t => [t.id, t]));
@@ -83,14 +90,40 @@ export async function runSpec(
   const waveResults: WaveResult[] = [];
   let allSuccess = true;
 
+  // Initialize session state
+  const sessionDir = options?.sessionDir;
+  const session: LaunchSession = {
+    specName: spec.name,
+    startedAt: new Date().toISOString(),
+    totalWaves: waves.length,
+    currentWave: 0,
+    status: 'running',
+    waves: waves.map(w => ({
+      number: w.number,
+      status: 'pending',
+      tasks: w.taskIds.map(id => ({ specId: id, internalId: '', status: 'pending' as const })),
+    })),
+  };
+  if (sessionDir) await writeSession(sessionDir, session);
+
   for (const wave of waves) {
     logger.info(`Wave ${wave.number}: dispatching ${wave.taskIds.join(', ')}`);
 
+    // Update session: wave starting
+    session.currentWave = wave.number;
+    const sessionWave = session.waves[wave.number - 1];
+    sessionWave.status = 'running';
+
     // Create internal tasks for this wave
-    const internalTasks = wave.taskIds.map(specId => {
+    const internalTasks = wave.taskIds.map((specId, idx) => {
       const specTask = taskMap.get(specId)!;
       const internalId = generateId();
       specToInternalId.set(specId, internalId);
+
+      // Update session task with internal ID
+      sessionWave.tasks[idx].internalId = internalId;
+      sessionWave.tasks[idx].status = 'running';
+      if (specTask.agent) sessionWave.tasks[idx].agent = specTask.agent;
 
       const task = createTask(specTask.prompt, internalId, {
         agent: specTask.agent,
@@ -99,6 +132,8 @@ export async function runSpec(
       storage.save(task);
       return { specId, internalId, task };
     });
+
+    if (sessionDir) await writeSession(sessionDir, session);
 
     // Dispatch all tasks in this wave in parallel
     await Promise.all(
@@ -111,14 +146,26 @@ export async function runSpec(
 
     for (const { specId, internalId } of internalTasks) {
       const result = queue.get(internalId);
+      const sessionTask = sessionWave.tasks.find(t => t.specId === specId);
       if (result?.status === 'completed') {
         completed.push(specId);
+        if (sessionTask) {
+          sessionTask.status = 'completed';
+          if (result.agent) sessionTask.agent = result.agent;
+        }
       } else {
         failed.push(specId);
         allSuccess = false;
         logger.error(`Task "${specId}" failed: ${result?.error ?? 'unknown error'}`);
+        if (sessionTask) {
+          sessionTask.status = 'failed';
+          if (result?.agent) sessionTask.agent = result.agent;
+        }
       }
     }
+
+    sessionWave.status = failed.length > 0 ? 'failed' : 'completed';
+    if (sessionDir) await writeSession(sessionDir, session);
 
     waveResults.push({
       wave: wave.number,
@@ -133,6 +180,10 @@ export async function runSpec(
       break;
     }
   }
+
+  // Finalize session
+  session.status = allSuccess ? 'completed' : 'failed';
+  if (sessionDir) await writeSession(sessionDir, session);
 
   return {
     success: allSuccess,

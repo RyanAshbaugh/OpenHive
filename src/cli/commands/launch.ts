@@ -1,10 +1,11 @@
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
 import chalk from 'chalk';
 import { getContext } from '../context.js';
 import { parseSpec } from '../../specs/parser.js';
 import { computeWaves, runSpec } from '../../specs/runner.js';
+import { readSession } from '../../specs/session.js';
 import { runVerification } from '../../verify/runner.js';
 import { printSuccess, printError, printInfo, printWarning, printJson, isJsonOutput, printTable } from '../output.js';
 
@@ -99,21 +100,48 @@ export function registerLaunchCommand(program: Command): void {
       console.log(chalk.bold(`\nLaunching: ${spec.name}`));
       console.log(chalk.gray(`${spec.tasks.length} tasks in ${waves.length} waves\n`));
 
-      // Run spec
-      const spinner = ora('Dispatching tasks...').start();
+      // Run spec with inline progress
+      const sessionDir = join(process.cwd(), '.openhive');
+      let lastWave = 0;
+
+      // Poll session.json for progress updates
+      const progressInterval = setInterval(async () => {
+        const session = await readSession(sessionDir);
+        if (!session) return;
+        if (session.currentWave > lastWave) {
+          lastWave = session.currentWave;
+          const wave = session.waves[session.currentWave - 1];
+          const taskList = wave.tasks.map(t => {
+            const agentTag = t.agent ? chalk.gray(` (${t.agent})`) : '';
+            return `${t.specId}${agentTag}`;
+          }).join(', ');
+          console.log(chalk.dim(`  Wave ${session.currentWave}/${session.totalWaves}: ${taskList}...`));
+        }
+        // Print completed tasks within current wave
+        const wave = session.waves[session.currentWave - 1];
+        if (wave) {
+          for (const t of wave.tasks) {
+            if (t.status === 'completed' || t.status === 'failed') {
+              const dot = t.status === 'completed' ? chalk.green('done') : chalk.red('failed');
+              // Only print once — tracked by checking if we already printed for this wave/task
+            }
+          }
+        }
+      }, 500);
+
       let runResult;
       try {
-        spinner.text = `Wave 1 of ${waves.length}...`;
-        runResult = await runSpec(spec, ctx.scheduler, ctx.queue, ctx.storage);
-        spinner.stop();
+        runResult = await runSpec(spec, ctx.scheduler, ctx.queue, ctx.storage, { sessionDir });
+        clearInterval(progressInterval);
       } catch (err) {
-        spinner.stop();
+        clearInterval(progressInterval);
         printError(`Launch failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
         return;
       }
 
       // Print wave results
+      console.log('');
       for (const wave of runResult.waves) {
         const status = wave.failed.length === 0
           ? chalk.green('done')
