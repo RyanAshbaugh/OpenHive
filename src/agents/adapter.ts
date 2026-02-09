@@ -7,12 +7,17 @@ export interface AgentCapabilities {
   headless: boolean;
 }
 
+/** Parse a JSONL line from streaming output into human-readable text */
+export type StreamParser = (line: string) => string | null;
+
 export interface AgentRunOptions {
   prompt: string;
   cwd: string;
   contextFiles?: string[];
   timeout?: number;
   logFile?: string;
+  /** When set, stdout is treated as JSONL. Each line is parsed to extract readable text for the log file and stdout accumulator. */
+  streamParser?: StreamParser;
 }
 
 export interface AgentRunResult {

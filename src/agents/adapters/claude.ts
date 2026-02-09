@@ -3,6 +3,7 @@ import type { AgentAdapter, AgentCapabilities, AgentRunOptions, AgentRunResult }
 import type { InteractionMode } from '../../config/schema.js';
 import { commandExists } from '../../utils/process.js';
 import { spawnAgent, runAgent } from '../subprocess.js';
+import { claudeStreamParser } from '../stream-parsers.js';
 
 export class ClaudeAdapter implements AgentAdapter {
   name = 'claude';
@@ -22,7 +23,7 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   buildCommand(options: AgentRunOptions): { command: string; args: string[] } {
-    const args = ['-p', options.prompt, '--output-format', 'text'];
+    const args = ['-p', options.prompt, '--output-format', 'stream-json'];
     if (options.contextFiles?.length) {
       for (const file of options.contextFiles) {
         args.push('--file', file);
@@ -38,6 +39,6 @@ export class ClaudeAdapter implements AgentAdapter {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     const { command, args } = this.buildCommand(options);
-    return runAgent(command, args, options);
+    return runAgent(command, args, { ...options, streamParser: claudeStreamParser });
   }
 }

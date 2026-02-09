@@ -30,7 +30,7 @@ describe('Agent Smoke Tests', () => {
       expect(args).toContain('-p');
       expect(args).toContain('hello world');
       expect(args).toContain('--output-format');
-      expect(args).toContain('text');
+      expect(args).toContain('stream-json');
     });
 
     it('should include context files in command', () => {
@@ -65,7 +65,8 @@ describe('Agent Smoke Tests', () => {
         cwd: '/tmp',
       });
       expect(command).toBe('codex');
-      expect(args).toContain('--quiet');
+      expect(args).toContain('exec');
+      expect(args).toContain('--json');
       expect(args).toContain('hello world');
     });
   });
@@ -87,6 +88,8 @@ describe('Agent Smoke Tests', () => {
       expect(command).toBe('gemini');
       expect(args).toContain('-p');
       expect(args).toContain('hello world');
+      expect(args).toContain('--output-format');
+      expect(args).toContain('stream-json');
     });
   });
 

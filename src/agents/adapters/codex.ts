@@ -3,6 +3,7 @@ import type { AgentAdapter, AgentCapabilities, AgentRunOptions, AgentRunResult }
 import type { InteractionMode } from '../../config/schema.js';
 import { commandExists } from '../../utils/process.js';
 import { spawnAgent, runAgent } from '../subprocess.js';
+import { codexStreamParser } from '../stream-parsers.js';
 
 export class CodexAdapter implements AgentAdapter {
   name = 'codex';
@@ -22,7 +23,7 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   buildCommand(options: AgentRunOptions): { command: string; args: string[] } {
-    const args = ['--quiet', options.prompt];
+    const args = ['exec', '--json', options.prompt];
     return { command: this.command, args };
   }
 
@@ -33,6 +34,6 @@ export class CodexAdapter implements AgentAdapter {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     const { command, args } = this.buildCommand(options);
-    return runAgent(command, args, options);
+    return runAgent(command, args, { ...options, streamParser: codexStreamParser });
   }
 }

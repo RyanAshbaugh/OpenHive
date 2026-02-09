@@ -1,23 +1,13 @@
+import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import chalk from 'chalk';
 import type { AppContext } from './context.js';
+import type { Task } from '../tasks/task.js';
 import {
   theme, BOX, progressBar, statusDot,
   ScreenBuffer, stripAnsi, padRight, renderPanel,
   runTuiLoop,
 } from './tui.js';
-
-// ─── Unicode Helpers ────────────────────────────────────────────────────────
-
-const SPARK = '▁▂▃▄▅▆▇█';
-
-function sparkline(values: number[]): string {
-  if (values.length === 0) return '';
-  const max = Math.max(...values, 1);
-  return values.map(v => {
-    const idx = Math.round((v / max) * 7);
-    return chalk.cyan(SPARK[idx]);
-  }).join('');
-}
 
 // ─── Dashboard Composer ─────────────────────────────────────────────────────
 
@@ -38,17 +28,21 @@ async function gatherAgents(ctx: AppContext): Promise<AgentInfo[]> {
   }));
 }
 
-function renderDashboard(
+// ─── Overview mode renderer ─────────────────────────────────────────────────
+
+function renderOverview(
   ctx: AppContext,
   agents: AgentInfo[],
   cols: number,
   rows: number,
+  selectedIdx: number,
+  logContent: string,
+  sortedTasks: Task[],
 ): string {
   const buf = new ScreenBuffer(cols, rows);
   const tasks = ctx.queue.list();
   const pools = ctx.poolTracker.getAllPools();
 
-  // ─── Outer frame ──────────────────────────────
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
   const titleBar = ' OpenHive ';
@@ -62,21 +56,18 @@ function renderDashboard(
     buf.write(r, outerLeft + outerW - 1, theme.border(BOX.v));
   }
 
-  // Bottom bar with keys
-  const keys = '  q quit  r refresh agents';
+  const keys = '  j/k select  Enter stream  x kill  r refresh  q quit';
   const bottomPad = outerW - 2 - keys.length;
   buf.write(rows - 1, outerLeft, theme.border(BOX.bl) + theme.dim(keys) + theme.border(BOX.h.repeat(Math.max(0, bottomPad)) + BOX.br));
 
-  // ─── Inner layout ─────────────────────────────
   const innerLeft = outerLeft + 2;
   const innerW = outerW - 4;
   let curRow = 2;
 
-  // ── Agents + Tasks (side by side) ─────────────
+  // ── Agents + Tasks summary (side by side) ──
   const agentPanelW = Math.floor(innerW * 0.4);
   const taskPanelW = innerW - agentPanelW - 1;
 
-  // Agent panel content
   const agentLines = agents.map(a => {
     const dot = a.available ? theme.success('●') : theme.dim('○');
     const provColor = theme.providers[a.provider] ?? chalk.white;
@@ -85,7 +76,6 @@ function renderDashboard(
   const agentPanelH = Math.max(agents.length + 2, 4);
   renderPanel(buf, curRow, innerLeft, agentPanelW, agentPanelH, 'Agents', agentLines);
 
-  // Tasks summary panel content
   const pending = tasks.filter(t => t.status === 'pending' || t.status === 'queued').length;
   const running = tasks.filter(t => t.status === 'running').length;
   const completed = tasks.filter(t => t.status === 'completed').length;
@@ -93,17 +83,17 @@ function renderDashboard(
   const total = Math.max(pending + running + completed + failed, 1);
   const barW = 10;
 
-  const taskLines = [
+  const taskSummaryLines = [
     `${padRight('Pending', 12)}${progressBar(pending, total, barW)}  ${pending}`,
     `${padRight('Running', 12)}${progressBar(running, total, barW)}  ${running}`,
     `${padRight('Completed', 12)}${progressBar(completed, total, barW)}  ${completed}`,
     `${padRight('Failed', 12)}${progressBar(failed, total, barW)}  ${failed}`,
   ];
-  renderPanel(buf, curRow, innerLeft + agentPanelW + 1, taskPanelW, agentPanelH, 'Tasks', taskLines);
+  renderPanel(buf, curRow, innerLeft + agentPanelW + 1, taskPanelW, agentPanelH, 'Summary', taskSummaryLines);
 
   curRow += agentPanelH + 1;
 
-  // ── Pool Usage panel ──────────────────────────
+  // ── Pool Usage panel ──
   const poolBarW = 20;
   const poolLines: string[] = [];
   for (const pool of pools) {
@@ -130,33 +120,91 @@ function renderDashboard(
   }
   const poolPanelH = poolLines.length + 2;
   const availRows = rows - curRow - 2;
-  const poolH = Math.min(poolPanelH, Math.floor(availRows * 0.55));
+  const poolH = Math.min(poolPanelH, Math.floor(availRows * 0.4));
   renderPanel(buf, curRow, innerLeft, innerW, poolH, 'Pool Usage', poolLines);
 
   curRow += poolH + 1;
 
-  // ── Recent Tasks panel ────────────────────────
+  // ── Task list (selectable) + live preview ──
+  const hasLog = logContent.length > 0;
   const remainingRows = rows - curRow - 2;
-  const recentH = Math.max(remainingRows, 4);
-  const sorted = [...tasks].sort((a, b) => {
-    const order: Record<string, number> = { running: 0, pending: 1, queued: 2, completed: 3, failed: 4, cancelled: 5 };
-    return (order[a.status] ?? 9) - (order[b.status] ?? 9);
-  });
-  const recent = sorted.slice(0, recentH - 2);
-  const recentLines = recent.map(t => {
+  const taskPanelH = hasLog ? Math.max(Math.floor(remainingRows * 0.45), 4) : Math.max(remainingRows, 4);
+
+  const recent = sortedTasks.slice(0, taskPanelH - 2);
+  const recentLines = recent.map((t, i) => {
+    const isSelected = i === selectedIdx;
     const dot = statusDot(t.status);
     const id = t.id.slice(0, 6);
     const status = padRight(t.status, 10);
     const agent = padRight(t.agent ?? '-', 8);
-    const dur = t.durationMs ? `${(t.durationMs / 1000).toFixed(1)}s` : '';
-    const promptW = innerW - 40;
+    const dur = t.durationMs
+      ? `${(t.durationMs / 1000).toFixed(1)}s`
+      : t.startedAt && t.status === 'running'
+        ? `${((Date.now() - new Date(t.startedAt).getTime()) / 1000).toFixed(0)}s...`
+        : '';
+    const prefix = isSelected ? theme.borderFocus('> ') : '  ';
+    const promptW = innerW - 44;
     const prompt = t.prompt.length > promptW ? t.prompt.slice(0, promptW - 3) + '...' : t.prompt;
-    return `${dot} ${theme.dim(id)}  ${status} ${agent} ${prompt}  ${theme.dim(dur)}`;
+    return `${prefix}${dot} ${theme.dim(id)}  ${status} ${agent} ${prompt}  ${theme.dim(dur)}`;
   });
   if (recentLines.length === 0) {
-    recentLines.push(theme.dim('No tasks yet. Use `openhive run` to create one.'));
+    recentLines.push(theme.dim('No tasks yet.'));
   }
-  renderPanel(buf, curRow, innerLeft, innerW, recentH, 'Recent Tasks', recentLines);
+  renderPanel(buf, curRow, innerLeft, innerW, taskPanelH, 'Tasks', recentLines);
+
+  curRow += taskPanelH + 1;
+
+  // ── Live preview panel ──
+  if (hasLog && curRow < rows - 2) {
+    const logPanelH = Math.max(rows - curRow - 2, 3);
+    const selected = sortedTasks[selectedIdx];
+    const logTitle = selected
+      ? `Preview: ${selected.id.slice(0, 6)}${selected.agent ? ` (${selected.agent})` : ''}`
+      : 'Preview';
+    const logLines = logContent.split('\n').slice(-(logPanelH - 2));
+    const maxLineW = innerW - 2;
+    const trimmedLogLines = logLines.map(l =>
+      stripAnsi(l).length > maxLineW ? l.slice(0, maxLineW - 3) + '...' : l,
+    );
+    renderPanel(buf, curRow, innerLeft, innerW, logPanelH, logTitle, trimmedLogLines);
+  }
+
+  return buf.flush();
+}
+
+// ─── Stream view renderer ───────────────────────────────────────────────────
+
+function renderStreamView(
+  ctx: AppContext,
+  taskId: string,
+  logContent: string,
+  cols: number,
+  rows: number,
+): string {
+  const buf = new ScreenBuffer(cols, rows);
+  const outerW = Math.min(cols, 80);
+  const outerLeft = Math.max(0, Math.floor((cols - outerW) / 2));
+  const innerW = outerW - 2;
+
+  const task = ctx.queue.get(taskId);
+  const statusStr = task?.status ?? 'unknown';
+  const agentStr = task?.agent ?? '';
+  const elapsed = task?.startedAt && task.status === 'running'
+    ? `${((Date.now() - new Date(task.startedAt).getTime()) / 1000).toFixed(0)}s`
+    : task?.durationMs ? `${(task.durationMs / 1000).toFixed(1)}s` : '';
+
+  const title = `${taskId.slice(0, 8)} ${agentStr} [${statusStr}] ${elapsed}`;
+  const panelH = rows - 1;
+  const logLines = logContent ? logContent.split('\n').slice(-(panelH - 2)) : [theme.dim('No output yet...')];
+  const maxLineW = innerW - 2;
+  const trimmed = logLines.map(l =>
+    stripAnsi(l).length > maxLineW ? l.slice(0, maxLineW - 3) + '...' : l,
+  );
+
+  renderPanel(buf, 0, outerLeft, outerW, panelH, title, trimmed);
+
+  const footer = theme.dim('  Esc back  q quit');
+  buf.write(rows - 1, outerLeft, footer);
 
   return buf.flush();
 }
@@ -165,15 +213,86 @@ function renderDashboard(
 
 export async function runDashboard(ctx: AppContext): Promise<void> {
   let agents = await gatherAgents(ctx);
+  let selectedIdx = 0;
+  let logContent = '';
+  let sortedTasks: Task[] = [];
+  let mode: 'overview' | 'stream' = 'overview';
+  let streamTaskId = '';
+
+  const getSortedTasks = (): Task[] => {
+    const tasks = ctx.queue.list();
+    return [...tasks].sort((a, b) => {
+      const order: Record<string, number> = { running: 0, pending: 1, queued: 2, completed: 3, failed: 4, cancelled: 5 };
+      return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+    });
+  };
+
+  const loadLogForTask = async (taskId: string) => {
+    const logPath = join(process.cwd(), '.openhive', 'logs', `${taskId}.log`);
+    try {
+      logContent = await readFile(logPath, 'utf-8');
+    } catch {
+      logContent = '';
+    }
+  };
 
   await runTuiLoop({
-    render: (cols, rows) => renderDashboard(ctx, agents, cols, rows),
+    render: (cols, rows) => {
+      if (mode === 'stream') {
+        return renderStreamView(ctx, streamTaskId, logContent, cols, rows);
+      }
+      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks);
+    },
     onKey: async (key) => {
+      if (mode === 'stream') {
+        // Esc or 'b' returns to overview
+        if (key === '\x1b' || key === 'b') {
+          mode = 'overview';
+          return;
+        }
+        if (key === 'q') {
+          process.exit(0);
+        }
+        return;
+      }
+
+      // Overview mode keys
       if (key === 'q') {
         process.exit(0);
       }
       if (key === 'r') {
         agents = await gatherAgents(ctx);
+      }
+      if (key === 'j' && selectedIdx < sortedTasks.length - 1) {
+        selectedIdx++;
+        const task = sortedTasks[selectedIdx];
+        if (task) await loadLogForTask(task.id);
+      }
+      if (key === 'k' && selectedIdx > 0) {
+        selectedIdx--;
+        const task = sortedTasks[selectedIdx];
+        if (task) await loadLogForTask(task.id);
+      }
+      // Enter: switch to full-screen stream view
+      if (key === '\r' || key === '\n') {
+        const task = sortedTasks[selectedIdx];
+        if (task) {
+          mode = 'stream';
+          streamTaskId = task.id;
+          await loadLogForTask(task.id);
+        }
+      }
+      // x: kill a running task
+      if (key === 'x') {
+        const task = sortedTasks[selectedIdx];
+        if (task && task.status === 'running') {
+          ctx.queue.update(task.id, {
+            status: 'failed',
+            error: 'Killed by user',
+            completedAt: new Date().toISOString(),
+          });
+          await ctx.storage.save(ctx.queue.get(task.id)!);
+        }
       }
     },
     onTick: async () => {
@@ -182,9 +301,21 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
         ctx.queue.loadAll(tasks);
         await ctx.poolTracker.reloadUsageStore();
       } catch {
-        // Ignore load errors in dashboard
+        // Ignore load errors
+      }
+      sortedTasks = getSortedTasks();
+      if (selectedIdx >= sortedTasks.length) {
+        selectedIdx = Math.max(0, sortedTasks.length - 1);
+      }
+      // Reload log for current view
+      if (mode === 'stream' && streamTaskId) {
+        await loadLogForTask(streamTaskId);
+      } else if (sortedTasks[selectedIdx]) {
+        await loadLogForTask(sortedTasks[selectedIdx].id);
+      } else {
+        logContent = '';
       }
     },
-    intervalMs: 1000,
+    intervalMs: 500,
   });
 }
