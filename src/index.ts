@@ -37,3 +37,17 @@ export { createTask } from './tasks/task.js';
 // Git
 export { createWorktree, listWorktrees, getWorktreeDiff, removeWorktree } from './git/worktree.js';
 export { mergeWorktree } from './git/merge.js';
+
+// Specs
+export type { ProjectSpec, ServeConfig, TaskSpec, VerifyConfig, ScreenshotSpec } from './specs/schema.js';
+export { parseSpec, validateSpec, SpecParseError } from './specs/parser.js';
+export { computeWaves, runSpec, CycleError } from './specs/runner.js';
+export type { Wave, SpecRunResult, WaveResult } from './specs/runner.js';
+
+// Verification
+export { runVerification } from './verify/runner.js';
+export type { VerifyResult, TestResult, ScreenshotVerifyResult } from './verify/runner.js';
+export { takeScreenshot } from './verify/screenshot.js';
+export type { ScreenshotResult } from './verify/screenshot.js';
+export { assessScreenshot, findVisionAgent } from './verify/assess.js';
+export type { AssessmentResult } from './verify/assess.js';

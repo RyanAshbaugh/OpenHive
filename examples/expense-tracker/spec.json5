@@ -1,0 +1,108 @@
+{
+  // Expense Tracker Dashboard — full-stack app built by the hive
+  name: "Expense Tracker Dashboard",
+  goal: "Full-stack expense tracker with auth, REST API, charts, and forms using Express + SQLite + EJS",
+
+  // Dev server for visual verification
+  serve: {
+    command: "npm run dev",
+    port: 3000,
+    readyPattern: "listening on",
+    startupTimeout: 15000,
+  },
+
+  tasks: [
+    // === Wave 1: Foundation ===
+    {
+      id: "scaffold",
+      name: "Project Scaffold",
+      prompt: "Set up a Node.js project with the following:\n- package.json with scripts: \"dev\" (nodemon src/server.js), \"start\" (node src/server.js), \"test\" (vitest run)\n- Dependencies: express, better-sqlite3, ejs, express-session, cookie-parser\n- Dev dependencies: nodemon, vitest, supertest, playwright, @playwright/test\n- Directory structure: src/ (server.js, routes/, views/, public/, db/), test/\n- src/server.js: Express app listening on port 3000, EJS view engine, static files from public/, session middleware\n- src/public/css/style.css: Basic responsive CSS with card layout, form styles, table styles\n- src/views/layout.ejs: HTML layout with nav bar, main content block, Chart.js CDN link\n- Run: npm install && npx playwright install chromium\nThe server should log \"listening on port 3000\" when started.",
+    },
+
+    // === Wave 2: Data + Auth (parallel) ===
+    {
+      id: "data-model",
+      name: "Data Model & Migrations",
+      prompt: "Create the SQLite database layer:\n- src/db/database.js: Initialize better-sqlite3 database at ./data/expenses.db (create data/ dir if needed)\n- src/db/migrations.js: Create tables:\n  - categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT DEFAULT '#6c757d')\n  - expenses (id INTEGER PRIMARY KEY, amount REAL NOT NULL, description TEXT, category_id INTEGER REFERENCES categories, date TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)\n- src/db/seed.js: Insert seed data:\n  - Categories: Food (#ff6384), Transport (#36a2eb), Entertainment (#ffce56), Bills (#4bc0c0), Shopping (#9966ff), Health (#ff9f40)\n  - 15-20 sample expenses across categories for the past 30 days with realistic amounts\n- src/db/models/expense.js: CRUD functions — getAll(filters?), getById(id), create(data), update(id, data), delete(id), getMonthlyTotal(), getByCategory()\n- src/db/models/category.js: CRUD functions — getAll(), getById(id), create(data)\n- Run migrations and seed on first require/import of database.js\nExport all models from src/db/index.js.",
+      dependsOn: ["scaffold"],
+      agent: "claude",
+    },
+    {
+      id: "auth",
+      name: "Dummy Auth System",
+      prompt: "Create a dummy authentication system with hardcoded test credentials:\n- src/auth/users.js: Hardcoded user store with test user: { email: \"test@test.com\", password: \"password\", name: \"Test User\" }\n- src/auth/middleware.js: Express middleware requireAuth that checks req.session.userId, redirects to /login if not authenticated\n- src/routes/auth.js: Express router with:\n  - GET /login — render login form (views/login.ejs)\n  - POST /login — validate credentials, set session, redirect to /dashboard\n  - GET /register — render register form (views/register.ejs)\n  - POST /register — add user to in-memory store, redirect to /login\n  - GET /logout — destroy session, redirect to /login\n- src/views/login.ejs: Styled login form with email + password fields, error display, link to register\n- src/views/register.ejs: Styled register form with name + email + password fields, link to login\nWire auth routes into the Express app in server.js. Redirect / to /login if not authenticated, /dashboard if authenticated.",
+      dependsOn: ["scaffold"],
+      agent: "codex",
+    },
+
+    // === Wave 3: APIs (parallel) ===
+    {
+      id: "expense-api",
+      name: "Expense REST API",
+      prompt: "Create the expense REST API:\n- src/routes/expenses.js: Express router with:\n  - GET /api/expenses — list all expenses (supports ?month=YYYY-MM filter), include category name via JOIN\n  - GET /api/expenses/:id — get single expense with category\n  - POST /api/expenses — create expense (validate: amount required & positive, date required)\n  - PUT /api/expenses/:id — update expense\n  - DELETE /api/expenses/:id — delete expense\n  - GET /api/expenses/stats/monthly — return { total, average, count, byCategory: [{name, total, color}] } for current month\n- All routes should use the requireAuth middleware\n- Return JSON responses with appropriate status codes (200, 201, 400, 404)\n- Wire into server.js",
+      dependsOn: ["data-model"],
+      agent: "claude",
+    },
+    {
+      id: "category-api",
+      name: "Category REST API",
+      prompt: "Create the category REST API:\n- src/routes/categories.js: Express router with:\n  - GET /api/categories — list all categories with expense count per category\n  - GET /api/categories/:id — get single category\n  - POST /api/categories — create category (validate: name required)\n- All routes should use the requireAuth middleware\n- Return JSON with appropriate status codes\n- Wire into server.js",
+      dependsOn: ["data-model"],
+      agent: "gemini",
+    },
+
+    // === Wave 4: UI + Tests (parallel — peak 4 agents) ===
+    {
+      id: "dashboard-ui",
+      name: "Dashboard UI",
+      prompt: "Create the main dashboard page:\n- src/views/dashboard.ejs: Full dashboard layout with:\n  - Summary cards row: Monthly Total ($X.XX), Average Expense, Transaction Count — styled as colored cards\n  - Expense chart: Doughnut chart using Chart.js showing spending by category (use category colors)\n  - Recent expenses table: Date, Description, Category (with color dot), Amount — sorted by date desc, last 10\n  - \"Add Expense\" button that opens a modal\n- src/routes/dashboard.js: Express router\n  - GET /dashboard — fetch stats from /api/expenses/stats/monthly, recent expenses, render dashboard.ejs\n- src/public/js/dashboard.js: Client-side JavaScript for:\n  - Fetch and render the Chart.js doughnut chart\n  - Handle delete button clicks (confirm + DELETE API call + refresh)\n- Use the requireAuth middleware on all dashboard routes\n- Wire into server.js",
+      dependsOn: ["expense-api"],
+      agent: "claude",
+    },
+    {
+      id: "expense-forms",
+      name: "Expense Forms",
+      prompt: "Create add/edit expense forms:\n- src/views/partials/expense-modal.ejs: Modal form partial with:\n  - Amount input (number, step 0.01, required)\n  - Description input (text)\n  - Category dropdown (populated from /api/categories)\n  - Date input (type=\"date\", defaults to today)\n  - Save and Cancel buttons\n- src/public/js/expense-form.js: Client-side JavaScript for:\n  - Open modal for new expense (clear form)\n  - Open modal for editing (populate form from expense data)\n  - Submit form via POST or PUT to /api/expenses\n  - Close modal and refresh expense table on success\n  - Show validation errors inline\n- Include the modal partial in dashboard.ejs\n- Wire the \"Add Expense\" button and edit buttons to the modal",
+      dependsOn: ["expense-api", "category-api"],
+      agent: "codex",
+    },
+    {
+      id: "auth-ui",
+      name: "Auth UI Polish",
+      prompt: "Polish the auth pages with proper styling and validation:\n- Update src/views/login.ejs: Centered card layout, styled form inputs, error message display (red banner), \"Remember me\" checkbox, responsive\n- Update src/views/register.ejs: Matching styled card, password confirmation field, inline validation hints\n- src/public/js/auth.js: Client-side validation:\n  - Email format validation\n  - Password min length (6 chars)\n  - Password confirmation match on register\n  - Disable submit button while processing\n- Add flash message support for \"Registration successful\" on login page after redirect\n- Update src/public/css/style.css: Add auth-specific styles (centered card, max-width 400px, subtle shadow)",
+      dependsOn: ["auth"],
+      agent: "gemini",
+    },
+    {
+      id: "tests",
+      name: "Automated Tests",
+      prompt: "Write comprehensive tests:\n- test/api/expenses.test.js: Supertest tests for expense API:\n  - GET /api/expenses returns array\n  - POST /api/expenses creates expense, returns 201\n  - POST /api/expenses with missing amount returns 400\n  - PUT /api/expenses/:id updates expense\n  - DELETE /api/expenses/:id removes expense\n- test/api/categories.test.js: Supertest tests for category API:\n  - GET /api/categories returns array with seed data\n  - POST /api/categories creates category\n- test/models/expense.test.js: Unit tests for expense model:\n  - getAll returns expenses\n  - create adds expense to database\n  - getMonthlyTotal returns correct sum\n- test/auth/auth.test.js: Auth flow tests:\n  - GET /login returns 200\n  - POST /login with valid credentials redirects to /dashboard\n  - POST /login with invalid credentials shows error\n  - GET /dashboard without auth redirects to /login\n- Use vitest and supertest. Export the Express app from server.js for testing (module.exports = app, only listen() when run directly).",
+      dependsOn: ["expense-api", "category-api", "auth"],
+      agent: "claude",
+    },
+  ],
+
+  verify: {
+    tests: "npm test",
+
+    screenshots: [
+      {
+        url: "http://localhost:3000/login",
+        name: "login-page",
+        expect: "A styled login form centered on the page with email and password input fields, a submit button, and a link to register. Card layout with subtle shadow.",
+      },
+      {
+        url: "http://localhost:3000/dashboard",
+        name: "dashboard",
+        expect: "A dashboard with summary cards (monthly total, average, count), a doughnut chart showing expenses by category with colors, and a table of recent expenses with date, description, category, and amount columns.",
+      },
+      {
+        url: "http://localhost:3000/dashboard",
+        name: "add-expense-modal",
+        expect: "A modal dialog/form overlaying the dashboard with fields for amount, description, a category dropdown, a date picker, and save/cancel buttons.",
+      },
+    ],
+
+    screenshotCommand: "npx playwright screenshot {url} {output}",
+  },
+}
