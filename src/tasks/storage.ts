@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Task } from './task.js';
 import { logger } from '../utils/logger.js';
@@ -27,6 +27,25 @@ export class TaskStorage {
     } catch {
       return null;
     }
+  }
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      await rm(this.taskPath(id));
+      logger.debug(`Deleted task ${id}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteAll(): Promise<number> {
+    const tasks = await this.loadAll();
+    let count = 0;
+    for (const task of tasks) {
+      if (await this.delete(task.id)) count++;
+    }
+    return count;
   }
 
   async loadAll(): Promise<Task[]> {
