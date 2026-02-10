@@ -189,7 +189,7 @@ function renderOverview(
   const titleBar = ' OpenHive ';
   const outerW = Math.min(cols, 80);
   const outerLeft = Math.max(0, Math.floor((cols - outerW) / 2));
-  const topBarPad = outerW - 2 - titleBar.length - timeStr.length - 2;
+  const topBarPad = outerW - 2 - titleBar.length - timeStr.length - 3;
   buf.write(0, outerLeft, theme.border(BOX.tl + BOX.h) + theme.title(titleBar) + theme.border(BOX.h.repeat(Math.max(0, topBarPad)) + ' ') + theme.dim(timeStr) + theme.border(' ' + BOX.tr));
 
   for (let r = 1; r < rows - 1; r++) {

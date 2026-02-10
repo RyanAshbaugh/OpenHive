@@ -150,7 +150,7 @@ export function renderPanel(
   const innerW = width - 2;
 
   const titleStr = title ? ` ${title} ` : '';
-  const topLine = border(BOX.tl + BOX.h) + theme.title(titleStr) + border(BOX.h.repeat(Math.max(0, innerW - stripAnsi(titleStr).length)) + BOX.tr);
+  const topLine = border(BOX.tl + BOX.h) + theme.title(titleStr) + border(BOX.h.repeat(Math.max(0, innerW - stripAnsi(titleStr).length - 1)) + BOX.tr);
   buf.write(row, col, topLine);
 
   for (let i = 0; i < height - 2; i++) {
