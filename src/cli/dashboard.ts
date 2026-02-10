@@ -3,6 +3,10 @@ import { readFile } from 'node:fs/promises';
 import chalk from 'chalk';
 import type { AppContext } from './context.js';
 import type { Task } from '../tasks/task.js';
+import type { ToolUsageReport } from '../pool/tool-usage.js';
+import { readAllToolUsage } from '../pool/tool-usage.js';
+import type { ProbeResult } from '../pool/usage-probe.js';
+import { getCachedProbeResults, loadProbeCache, isProbing, cleanupProbeSession } from '../pool/usage-probe.js';
 import {
   theme, BOX, progressBar, statusDot,
   ScreenBuffer, stripAnsi, padRight, renderPanel,
@@ -20,6 +24,25 @@ function formatCountdown(ms: number): string {
   if (m > 0) return `~${m}m`;
   return `~${totalSec}s`;
 }
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/** Shorten verbose timezone strings at display time */
+function shortenReset(s: string): string {
+  return s
+    .replace(/\(America\/Los_Angeles\)/g, 'PT')
+    .replace(/\(America\/New_York\)/g, 'ET')
+    .replace(/\(America\/Chicago\)/g, 'CT')
+    .replace(/\([A-Za-z/_]+\)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+type PoolMode = 'tool' | 'openhive';
 
 // ─── Dashboard Composer ─────────────────────────────────────────────────────
 
@@ -40,6 +63,109 @@ async function gatherAgents(ctx: AppContext): Promise<AgentInfo[]> {
   }));
 }
 
+// ─── Pool panel renderers ───────────────────────────────────────────────────
+
+function renderPoolTool(
+  pools: { provider: string }[],
+  toolUsage: Map<string, ToolUsageReport>,
+  probeResults: Map<string, ProbeResult>,
+  innerW: number,
+): string[] {
+  const lines: string[] = [];
+  const barW = 12;
+
+  for (const pool of pools) {
+    const provColor = theme.providers[pool.provider] ?? chalk.white;
+    const probe = probeResults.get(pool.provider);
+
+    // No usage command for this provider
+    if (probe?.error === 'No usage command available' || probe?.error === 'No usage command') {
+      lines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim('N/A')}`);
+      continue;
+    }
+
+    // Have probe data — show real bars (max 2 windows per line to fit)
+    if (probe && probe.available && probe.windows.length > 0) {
+      // Show the 2 most important windows (5h and wk, or day, etc.)
+      const displayWins = probe.windows.slice(0, 2);
+      const segments: string[] = [];
+      for (const win of displayWins) {
+        const bar = progressBar(win.percentUsed, 100, barW);
+        const pctStr = `${win.percentUsed}%`;
+        const reset = win.resetInfo ? theme.dim(` ${shortenReset(win.resetInfo)}`) : '';
+        segments.push(`${theme.dim(padRight(win.label, 4))}${bar} ${padRight(pctStr, 5)}${reset}`);
+      }
+
+      // Stale indicator: if probed more than 5 mins ago
+      const age = Date.now() - new Date(probe.probedAt).getTime();
+      const stale = age > 5 * 60_000 ? theme.dim(' *') : '';
+
+      lines.push(`${provColor(padRight(pool.provider, 11))}${segments.join('  ')}${stale}`);
+      continue;
+    }
+
+    // No probe data yet — show placeholder bars or "probing..."
+    if (isProbing()) {
+      lines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim('probing...')}`);
+    } else {
+      // Probe failed or hasn't run — show what we have from local files
+      const report = toolUsage.get(pool.provider);
+      if (report?.available && report.today) {
+        const parts: string[] = [];
+        if (report.today.messages > 0) parts.push(`${formatNumber(report.today.messages)} msgs`);
+        if (report.today.sessions > 0) parts.push(`${report.today.sessions} sess`);
+        if (report.today.tokens > 0) parts.push(`${formatNumber(report.today.tokens)} tok`);
+        const info = parts.length > 0 ? parts.join('  ') : 'no activity today';
+        lines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim(info)}  ${theme.dim('(r to probe)')}`);
+      } else {
+        lines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim('no data')}  ${theme.dim('(r to probe)')}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
+function renderPoolOpenHive(
+  ctx: AppContext,
+  pools: { provider: string; maxConcurrent: number; activeCount: number }[],
+  innerW: number,
+): string[] {
+  const lines: string[] = [];
+  const poolBarW = 8;
+
+  for (const pool of pools) {
+    const provColor = theme.providers[pool.provider] ?? chalk.white;
+    const summary = ctx.poolTracker.getUsageSummary(pool.provider);
+
+    if (summary.windows.length === 0) {
+      const slots = summary.activeCount > 0
+        ? theme.info(`${summary.activeCount} active`)
+        : theme.dim('idle');
+      lines.push(`${provColor(padRight(pool.provider, 11))}${slots}  ${theme.dim('no known limits')}`);
+      continue;
+    }
+
+    const segments: string[] = [];
+    for (const win of summary.windows) {
+      const bar = progressBar(win.used, win.limit ?? 0, poolBarW);
+      const label = win.limit ? `${win.used}/${win.limit}` : String(win.used);
+      let reset = '';
+      if (win.resetInMs !== undefined && win.used > 0) {
+        reset = theme.dim(` ${formatCountdown(win.resetInMs)}`);
+      }
+      segments.push(`${theme.dim(padRight(win.label, 4))}${bar} ${padRight(label, 7)}${reset}`);
+    }
+
+    const slots = summary.activeCount > 0
+      ? theme.info(`${summary.activeCount}/${summary.maxConcurrent}`)
+      : theme.dim('idle');
+    lines.push(`${provColor(padRight(pool.provider, 11))}${padRight(slots, 6)} ${segments.join('  ')}`);
+  }
+
+  return lines;
+}
+
 // ─── Overview mode renderer ─────────────────────────────────────────────────
 
 function renderOverview(
@@ -50,6 +176,9 @@ function renderOverview(
   selectedIdx: number,
   logContent: string,
   sortedTasks: Task[],
+  poolMode: PoolMode,
+  toolUsage: Map<string, ToolUsageReport>,
+  probeResults: Map<string, ProbeResult>,
 ): string {
   const buf = new ScreenBuffer(cols, rows);
   const tasks = ctx.queue.list();
@@ -68,7 +197,7 @@ function renderOverview(
     buf.write(r, outerLeft + outerW - 1, theme.border(BOX.v));
   }
 
-  const keys = '  j/k select  Enter stream  x kill  r refresh  q quit';
+  const keys = '  j/k select  Enter stream  p pools  x kill  r refresh  q quit';
   const bottomPad = outerW - 2 - keys.length;
   buf.write(rows - 1, outerLeft, theme.border(BOX.bl) + theme.dim(keys) + theme.border(BOX.h.repeat(Math.max(0, bottomPad)) + BOX.br));
 
@@ -83,7 +212,7 @@ function renderOverview(
   const agentLines = agents.map(a => {
     const dot = a.available ? theme.success('●') : theme.dim('○');
     const provColor = theme.providers[a.provider] ?? chalk.white;
-    return `${dot} ${padRight(a.displayName, agentPanelW - 14)}${provColor(a.provider)}`;
+    return `${dot} ${padRight(a.displayName, agentPanelW - 15)}${provColor(a.provider)}`;
   });
   const agentPanelH = Math.max(agents.length + 2, 4);
   renderPanel(buf, curRow, innerLeft, agentPanelW, agentPanelH, 'Agents', agentLines);
@@ -105,39 +234,20 @@ function renderOverview(
 
   curRow += agentPanelH + 1;
 
-  // ── Pool Usage panel (compact: 1 line per provider) ──
-  const poolBarW = 8;
-  const poolLines: string[] = [];
-  for (const pool of pools) {
-    const provColor = theme.providers[pool.provider] ?? chalk.white;
-    const summary = ctx.poolTracker.getUsageSummary(pool.provider);
+  // ── Pool panel ──
+  const probingIndicator = isProbing() ? ' ...' : '';
+  const poolTitle = poolMode === 'tool'
+    ? `Pools: Tool Usage${probingIndicator} (p to toggle)`
+    : 'Pools: OpenHive (p to toggle)';
 
-    if (summary.windows.length === 0) {
-      // No known limits (e.g. cursor)
-      const active = `${summary.activeCount}/${summary.maxConcurrent}`;
-      poolLines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim(active)}  ${theme.dim('N/A')}`);
-      continue;
-    }
+  const poolLines = poolMode === 'tool'
+    ? renderPoolTool(pools, toolUsage, probeResults, innerW)
+    : renderPoolOpenHive(ctx, pools, innerW);
 
-    // Build compact window segments: "5h ████░░░░ 3  wk ████░░░░ 1"
-    const segments: string[] = [];
-    for (const win of summary.windows) {
-      const bar = progressBar(win.used, win.limit ?? 0, poolBarW);
-      const label = win.limit ? `${win.used}/${win.limit}` : String(win.used);
-      let reset = '';
-      if (win.resetInMs !== undefined && win.used > 0) {
-        reset = theme.dim(` ${formatCountdown(win.resetInMs)}`);
-      }
-      segments.push(`${theme.dim(padRight(win.label, 4))}${bar} ${padRight(label, 6)}${reset}`);
-    }
-
-    const active = `${summary.activeCount}/${summary.maxConcurrent}`;
-    poolLines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim(active)}  ${segments.join('  ')}`);
-  }
-  const poolPanelH = poolLines.length + 2;
+  const poolPanelH = Math.max(poolLines.length + 2, 4);
   const availRows = rows - curRow - 2;
-  const poolH = Math.min(poolPanelH, Math.max(poolLines.length + 2, 4));
-  renderPanel(buf, curRow, innerLeft, innerW, Math.min(poolH, availRows), 'Pools', poolLines);
+  const poolH = Math.min(poolPanelH, availRows);
+  renderPanel(buf, curRow, innerLeft, innerW, poolH, poolTitle, poolLines);
 
   curRow += poolH + 1;
 
@@ -234,6 +344,22 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
   let sortedTasks: Task[] = [];
   let mode: 'overview' | 'stream' = 'overview';
   let streamTaskId = '';
+  let poolMode: PoolMode = 'tool';
+  let toolUsage = new Map<string, ToolUsageReport>();
+  let probeResults = new Map<string, ProbeResult>();
+
+  // Load persisted probe cache from disk (instant — shows last-known bars)
+  probeResults = await loadProbeCache();
+
+  // Load local file usage data (fast)
+  try {
+    toolUsage = await readAllToolUsage();
+  } catch {
+    // ignore
+  }
+
+  // Trigger a fresh background probe (takes ~10s, runs in parallel)
+  getCachedProbeResults();
 
   const getSortedTasks = (): Task[] => {
     const tasks = ctx.queue.list();
@@ -252,12 +378,14 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
     }
   };
 
+  let tickCount = 0;
+
   await runTuiLoop({
     render: (cols, rows) => {
       if (mode === 'stream') {
         return renderStreamView(ctx, streamTaskId, logContent, cols, rows);
       }
-      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks);
+      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks, poolMode, toolUsage, probeResults);
     },
     onKey: async (key) => {
       if (mode === 'stream') {
@@ -274,10 +402,16 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
 
       // Overview mode keys
       if (key === 'q') {
+        cleanupProbeSession().catch(() => {});
         process.exit(0);
       }
       if (key === 'r') {
         agents = await gatherAgents(ctx);
+        toolUsage = await readAllToolUsage();
+        probeResults = getCachedProbeResults();
+      }
+      if (key === 'p') {
+        poolMode = poolMode === 'tool' ? 'openhive' : 'tool';
       }
       if (key === 'j' && selectedIdx < sortedTasks.length - 1) {
         selectedIdx++;
@@ -327,6 +461,17 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       if (selectedIdx >= sortedTasks.length) {
         selectedIdx = Math.max(0, sortedTasks.length - 1);
       }
+      tickCount++;
+      // Reload local file usage every 10 ticks (~5 seconds)
+      if (tickCount % 10 === 0) {
+        try {
+          toolUsage = await readAllToolUsage();
+        } catch {
+          // ignore
+        }
+      }
+      // Refresh probe cache (returns immediately, triggers bg probe if stale)
+      probeResults = getCachedProbeResults();
       // Reload log for current view
       if (mode === 'stream' && streamTaskId) {
         await loadLogForTask(streamTaskId);

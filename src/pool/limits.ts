@@ -83,6 +83,7 @@ export const PROVIDER_LIMITS: Record<string, ProviderLimitDef> = {
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code/overview',
     investigationMethod:
       'Run `/usage` inside Claude Code to see current window status. ' +
+      'Automated: usage-probe.ts starts Claude in tmux → sends /usage → parses "X% used" bars. ' +
       'Check https://support.anthropic.com/en/articles/usage-limits for plan-specific limits. ' +
       'Search "claude code rate limits" for community benchmarks.',
   },
@@ -116,6 +117,7 @@ export const PROVIDER_LIMITS: Record<string, ProviderLimitDef> = {
     docsUrl: 'https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan',
     investigationMethod:
       'Run `/status` inside Codex CLI to check 5h window remaining. ' +
+      'Automated: usage-probe.ts starts Codex in tmux → sends /status → parses "X% left" bars. ' +
       'Check https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan for plan tiers. ' +
       'Check https://community.openai.com for community reports on actual limits.',
   },
@@ -148,9 +150,10 @@ export const PROVIDER_LIMITS: Record<string, ProviderLimitDef> = {
       'Gemini CLI limits are more generous than standard Gemini API limits.',
     docsUrl: 'https://ai.google.dev/gemini-api/docs/rate-limits',
     investigationMethod:
+      'Run `/stats` inside Gemini CLI to see per-model usage. ' +
+      'Automated: usage-probe.ts starts Gemini in tmux → sends /stats → parses "X% (Resets in Yh)" per model. ' +
       'Check https://geminicli.com/docs/quota-and-pricing/ for CLI-specific limits. ' +
-      'Check https://ai.google.dev/gemini-api/docs/rate-limits for API tier limits. ' +
-      'Run `gemini --help` to see available flags.',
+      'Check https://ai.google.dev/gemini-api/docs/rate-limits for API tier limits.',
   },
 
   cursor: {

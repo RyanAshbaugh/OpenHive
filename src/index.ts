@@ -27,6 +27,12 @@ export { CursorAdapter } from './agents/adapters/cursor.js';
 export { loadConfig, resetConfigCache, getGlobalConfigDir } from './config/config.js';
 export { DEFAULT_CONFIG } from './config/defaults.js';
 
+// Tool control + probing
+export type { ToolControl, TmuxStep } from './agents/tool-control.js';
+export { TOOL_CONTROLS, buildUsageProbeSteps, buildExitSteps } from './agents/tool-control.js';
+export type { ProbeResult, UsageWindow } from './pool/usage-probe.js';
+export { probeTool, probeAllTools, getCachedProbeResults, loadProbeCache, isProbing, forceProbe, cleanupProbeSession } from './pool/usage-probe.js';
+
 // Utils
 export { generateId, generateShortId } from './utils/id.js';
 export { logger, setLogLevel } from './utils/logger.js';
