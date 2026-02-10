@@ -115,6 +115,50 @@ async function killWindow(target: string): Promise<void> {
   }
 }
 
+// ─── Readiness detection ─────────────────────────────────────────────────────
+
+/**
+ * Wait for a tool's main UI to be ready for input.
+ * Polls the pane, looking for the readyPattern. If a startup dialog
+ * is detected (update prompts, model choosers), sends Escape to dismiss.
+ * Returns the captured output when ready, or throws after timeout.
+ */
+async function waitForReady(target: string, tool: string): Promise<string> {
+  const ctrl = TOOL_CONTROLS[tool];
+  const maxWaitMs = 15000;
+  const pollMs = 1000;
+  const maxAttempts = Math.ceil(maxWaitMs / pollMs);
+
+  // Wait a bit for the tool to start rendering
+  await sleep(2000);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const raw = await capturePane(target, ctrl.captureScrollback);
+    const output = stripAnsi(raw);
+
+    // Check if the main UI is ready
+    if (ctrl.readyPattern.test(output)) {
+      logger.debug(`${tool} ready after ${attempt + 1} polls`);
+      return output;
+    }
+
+    // Check for startup dialogs that need dismissing
+    if (ctrl.startupDialogPattern && ctrl.startupDialogPattern.test(output)) {
+      logger.debug(`${tool}: startup dialog detected, sending Escape`);
+      await sendKeys(target, ['Escape']);
+      await sleep(1500);
+      continue;
+    }
+
+    // Not ready yet and no dialog — wait and retry
+    await sleep(pollMs);
+  }
+
+  // Timed out — return whatever we have (probeTool will try anyway)
+  logger.debug(`${tool}: readiness timeout after ${maxWaitMs}ms, proceeding anyway`);
+  return await capturePane(target, ctrl.captureScrollback);
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape codes from tmux captured output */
@@ -349,11 +393,9 @@ export async function probeTool(tool: string): Promise<ProbeResult> {
   try {
     // Session must be created by probeAllTools() before calling probeTool()
     const target = await createProbePane(tool);
-    await sleep(3000);  // Tools need time to initialize their TUI
 
-    // Dismiss any startup prompts (update dialogs, welcome screens)
-    await sendKeys(target, ['Enter']);
-    await sleep(1500);
+    // Wait for the tool to be ready for input (handles startup prompts)
+    await waitForReady(target, tool);
 
     // Send usage command
     const steps = buildUsageProbeSteps(tool);
