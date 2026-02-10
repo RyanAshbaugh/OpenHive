@@ -10,6 +10,8 @@ export interface DayBucket {
 export interface ProviderUsage {
   daily: Record<string, DayBucket>;
   weekly: Record<string, DayBucket>;
+  /** ISO timestamps of each dispatch, used for rolling window calculations */
+  dispatches: string[];
 }
 
 export interface UsageStoreData {
@@ -31,6 +33,13 @@ export class PoolUsageStore {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
+  /** YYYY-MM-DD in Pacific Time (for Google daily reset at midnight PT) */
+  todayKeyPT(): string {
+    const d = new Date();
+    const pt = new Date(d.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    return `${pt.getFullYear()}-${String(pt.getMonth() + 1).padStart(2, '0')}-${String(pt.getDate()).padStart(2, '0')}`;
+  }
+
   /** Monday-based ISO week start date as YYYY-MM-DD */
   weekKey(): string {
     const d = new Date();
@@ -42,7 +51,11 @@ export class PoolUsageStore {
 
   private ensureProvider(provider: string): ProviderUsage {
     if (!this.data.providers[provider]) {
-      this.data.providers[provider] = { daily: {}, weekly: {} };
+      this.data.providers[provider] = { daily: {}, weekly: {}, dispatches: [] };
+    }
+    // Migrate old data that lacks dispatches array
+    if (!this.data.providers[provider].dispatches) {
+      this.data.providers[provider].dispatches = [];
     }
     return this.data.providers[provider];
   }
@@ -60,6 +73,7 @@ export class PoolUsageStore {
     const weekBucket = this.ensureBucket(usage.weekly, this.weekKey());
     dayBucket.dispatched++;
     weekBucket.dispatched++;
+    usage.dispatches.push(new Date().toISOString());
   }
 
   recordFailure(provider: string): void {
@@ -82,11 +96,50 @@ export class PoolUsageStore {
     return usage.weekly[this.weekKey()] ?? { dispatched: 0, failed: 0 };
   }
 
-  /** Remove buckets older than 30 days */
+  /** Count dispatches within a rolling window (e.g. last 5 hours) */
+  getRollingCount(provider: string, windowMs: number): number {
+    const usage = this.data.providers[provider];
+    if (!usage?.dispatches) return 0;
+    const cutoff = new Date(Date.now() - windowMs).toISOString();
+    return usage.dispatches.filter(ts => ts >= cutoff).length;
+  }
+
+  /** Count dispatches today in Pacific Time (for Google's midnight PT reset) */
+  getDailyCountPT(provider: string): number {
+    const usage = this.data.providers[provider];
+    if (!usage?.dispatches) return 0;
+    // Get start of today in PT
+    const now = new Date();
+    const ptStr = now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+    const ptNow = new Date(ptStr);
+    const startOfDayPT = new Date(ptNow.getFullYear(), ptNow.getMonth(), ptNow.getDate());
+    // Convert back to UTC for comparison
+    const offset = now.getTime() - ptNow.getTime();
+    const cutoff = new Date(startOfDayPT.getTime() + offset).toISOString();
+    return usage.dispatches.filter(ts => ts >= cutoff).length;
+  }
+
+  /** Count dispatches in the last N milliseconds (for RPM-style windows) */
+  getWindowCount(provider: string, windowMs: number): number {
+    return this.getRollingCount(provider, windowMs);
+  }
+
+  /** Get the timestamp of the oldest dispatch in a rolling window (for reset countdown) */
+  getOldestInWindow(provider: string, windowMs: number): string | undefined {
+    const usage = this.data.providers[provider];
+    if (!usage?.dispatches) return undefined;
+    const cutoff = new Date(Date.now() - windowMs).toISOString();
+    const inWindow = usage.dispatches.filter(ts => ts >= cutoff).sort();
+    return inWindow[0];
+  }
+
+  /** Remove buckets older than 30 days and dispatch timestamps older than 8 days */
   prune(): void {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const dispatchCutoff = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
 
     for (const provider of Object.values(this.data.providers)) {
       for (const key of Object.keys(provider.daily)) {
@@ -94,6 +147,9 @@ export class PoolUsageStore {
       }
       for (const key of Object.keys(provider.weekly)) {
         if (key < cutoffStr) delete provider.weekly[key];
+      }
+      if (provider.dispatches) {
+        provider.dispatches = provider.dispatches.filter(ts => ts >= dispatchCutoff);
       }
     }
   }
@@ -112,6 +168,7 @@ export class PoolUsageStore {
   }
 
   async save(): Promise<void> {
+    this.prune();
     try {
       const dir = this.filePath.replace(/[/\\][^/\\]+$/, '');
       await mkdir(dir, { recursive: true });

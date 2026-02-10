@@ -1,7 +1,30 @@
 import type { ProviderPool } from './provider.js';
 import type { ProviderPoolConfig } from '../config/schema.js';
 import { PoolUsageStore } from './usage-store.js';
+import { getProviderLimits } from './limits.js';
+import type { RateLimitWindow } from './limits.js';
 import { logger } from '../utils/logger.js';
+
+/** Summary of a single rate limit window for dashboard display */
+export interface WindowSummary {
+  id: string;
+  label: string;
+  type: 'rolling' | 'fixed';
+  used: number;
+  limit: number | undefined;
+  /** For rolling windows: ms until the oldest dispatch in the window expires */
+  resetInMs?: number;
+  /** Human-readable reset description */
+  resetDescription: string;
+}
+
+/** Full usage summary for a provider */
+export interface ProviderUsageSummary {
+  provider: string;
+  activeCount: number;
+  maxConcurrent: number;
+  windows: WindowSummary[];
+}
 
 export class PoolTracker {
   private pools = new Map<string, ProviderPool>();
@@ -55,9 +78,22 @@ export class PoolTracker {
 
     if (pool.activeCount >= pool.maxConcurrent) return false;
 
-    // Check daily/weekly limits from usage store
+    // Check provider-specific limits
     if (this.usageStore) {
       const config = this.configs.get(provider);
+      const limits = getProviderLimits(provider);
+
+      if (limits && config) {
+        for (const win of limits.windows) {
+          const configuredLimit = this.getWindowLimit(provider, win);
+          if (configuredLimit === undefined) continue;
+
+          const used = this.getWindowUsed(provider, win);
+          if (used >= configuredLimit) return false;
+        }
+      }
+
+      // Legacy support for dailyLimit/weeklyLimit
       if (config) {
         if (config.dailyLimit !== undefined) {
           const daily = this.usageStore.getDailyUsage(provider);
@@ -119,6 +155,94 @@ export class PoolTracker {
     const lower = output.toLowerCase();
     return lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('quota exceeded');
   }
+
+  // ─── Provider-specific window queries ──────────────────────────────────────
+
+  /** Get the configured or default limit for a specific window */
+  private getWindowLimit(provider: string, win: RateLimitWindow): number | undefined {
+    const config = this.configs.get(provider);
+    if (config?.windows) {
+      const override = config.windows.find(w => w.id === win.id);
+      if (override?.limit !== undefined) return override.limit;
+    }
+    return win.defaultLimit;
+  }
+
+  /** Get the current usage count for a specific window */
+  private getWindowUsed(provider: string, win: RateLimitWindow): number {
+    if (!this.usageStore) return 0;
+
+    if (win.type === 'rolling') {
+      return this.usageStore.getRollingCount(provider, win.windowMs);
+    }
+
+    // Fixed windows
+    if (win.id === 'daily') {
+      return this.usageStore.getDailyCountPT(provider);
+    }
+    if (win.id === 'rpm') {
+      return this.usageStore.getWindowCount(provider, win.windowMs);
+    }
+
+    // Fallback: use rolling count for unknown fixed windows
+    return this.usageStore.getRollingCount(provider, win.windowMs);
+  }
+
+  /** Get reset countdown for a rolling window */
+  private getResetInMs(provider: string, win: RateLimitWindow): number | undefined {
+    if (!this.usageStore) return undefined;
+
+    if (win.type === 'rolling') {
+      const oldest = this.usageStore.getOldestInWindow(provider, win.windowMs);
+      if (!oldest) return undefined;
+      const expiresAt = new Date(oldest).getTime() + win.windowMs;
+      return Math.max(0, expiresAt - Date.now());
+    }
+
+    // Fixed daily (midnight PT)
+    if (win.id === 'daily') {
+      const now = new Date();
+      const ptStr = now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const ptNow = new Date(ptStr);
+      const midnight = new Date(ptNow.getFullYear(), ptNow.getMonth(), ptNow.getDate() + 1);
+      const offset = now.getTime() - ptNow.getTime();
+      return midnight.getTime() + offset - Date.now();
+    }
+
+    // RPM resets every minute — not worth showing countdown
+    return undefined;
+  }
+
+  /** Get a full usage summary for a provider, ready for dashboard display */
+  getUsageSummary(provider: string): ProviderUsageSummary {
+    const pool = this.pools.get(provider);
+    const limits = getProviderLimits(provider);
+
+    const windows: WindowSummary[] = [];
+
+    if (limits) {
+      for (const win of limits.windows) {
+        windows.push({
+          id: win.id,
+          label: win.label,
+          type: win.type,
+          used: this.getWindowUsed(provider, win),
+          limit: this.getWindowLimit(provider, win),
+          resetInMs: this.getResetInMs(provider, win),
+          resetDescription: win.resetDescription,
+        });
+      }
+    }
+
+    return {
+      provider,
+      activeCount: pool?.activeCount ?? 0,
+      maxConcurrent: pool?.maxConcurrent ?? 0,
+      windows,
+    };
+  }
+
+  // ─── Legacy accessors (kept for backward compat with tests) ────────────────
 
   getDailyUsage(provider: string) {
     return this.usageStore?.getDailyUsage(provider) ?? { dispatched: 0, failed: 0 };

@@ -32,10 +32,33 @@ export const DEFAULT_CONFIG: OpenHiveConfig = {
     },
   },
   pools: [
-    { provider: 'anthropic', maxConcurrent: 5, cooldownMs: 1000 },
-    { provider: 'openai', maxConcurrent: 5, cooldownMs: 1000 },
-    { provider: 'google', maxConcurrent: 5, cooldownMs: 1000 },
-    { provider: 'cursor', maxConcurrent: 2, cooldownMs: 1000 },
+    {
+      provider: 'anthropic',
+      maxConcurrent: 5,
+      cooldownMs: 1000,
+      // 5h rolling + weekly rolling — limits vary by plan, tracked but no hard cap
+    },
+    {
+      provider: 'openai',
+      maxConcurrent: 5,
+      cooldownMs: 1000,
+      // 5h rolling + weekly rolling — limits vary by plan, tracked but no hard cap
+    },
+    {
+      provider: 'google',
+      maxConcurrent: 5,
+      cooldownMs: 1000,
+      windows: [
+        { id: 'rpm', limit: 60 },    // Free tier: 60 RPM
+        { id: 'daily', limit: 1000 }, // Free tier: 1,000 RPD
+      ],
+    },
+    {
+      provider: 'cursor',
+      maxConcurrent: 2,
+      cooldownMs: 1000,
+      // No known rate limits for programmatic usage
+    },
   ],
   worktreeDir: '.openhive-worktrees',
   taskStorageDir: '',  // resolved at runtime to ~/.openhive/tasks

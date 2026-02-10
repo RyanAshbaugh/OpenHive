@@ -56,6 +56,7 @@ export class TaskQueue {
   }
 
   loadAll(tasks: Task[]): void {
+    this.tasks.clear();
     for (const task of tasks) {
       this.tasks.set(task.id, task);
     }

@@ -9,6 +9,18 @@ import {
   runTuiLoop,
 } from './tui.js';
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return '';
+  const totalSec = Math.ceil(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (h > 0) return `~${h}h${m > 0 ? `${m}m` : ''}`;
+  if (m > 0) return `~${m}m`;
+  return `~${totalSec}s`;
+}
+
 // ─── Dashboard Composer ─────────────────────────────────────────────────────
 
 interface AgentInfo {
@@ -93,35 +105,39 @@ function renderOverview(
 
   curRow += agentPanelH + 1;
 
-  // ── Pool Usage panel ──
-  const poolBarW = 20;
+  // ── Pool Usage panel (compact: 1 line per provider) ──
+  const poolBarW = 8;
   const poolLines: string[] = [];
   for (const pool of pools) {
     const provColor = theme.providers[pool.provider] ?? chalk.white;
-    const active = `Active ${pool.activeCount}/${pool.maxConcurrent}`;
-    poolLines.push(`${provColor(padRight(pool.provider, 14))}${theme.dim(active)}`);
+    const summary = ctx.poolTracker.getUsageSummary(pool.provider);
 
-    const daily = ctx.poolTracker.getDailyUsage(pool.provider);
-    const dailyLimit = ctx.poolTracker.getDailyLimit(pool.provider);
-    const dBar = progressBar(daily.dispatched, dailyLimit ?? 0, poolBarW);
-    const dLabel = dailyLimit ? `${daily.dispatched}/${dailyLimit}` : String(daily.dispatched);
-    poolLines.push(`  ${padRight('Daily', 8)}${dBar}  ${dLabel}`);
+    if (summary.windows.length === 0) {
+      // No known limits (e.g. cursor)
+      const active = `${summary.activeCount}/${summary.maxConcurrent}`;
+      poolLines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim(active)}  ${theme.dim('N/A')}`);
+      continue;
+    }
 
-    const weekly = ctx.poolTracker.getWeeklyUsage(pool.provider);
-    const weeklyLimit = ctx.poolTracker.getWeeklyLimit(pool.provider);
-    const wBar = progressBar(weekly.dispatched, weeklyLimit ?? 0, poolBarW);
-    const wLabel = weeklyLimit ? `${weekly.dispatched}/${weeklyLimit}` : String(weekly.dispatched);
-    poolLines.push(`  ${padRight('Weekly', 8)}${wBar}  ${wLabel}`);
+    // Build compact window segments: "5h ████░░░░ 3  wk ████░░░░ 1"
+    const segments: string[] = [];
+    for (const win of summary.windows) {
+      const bar = progressBar(win.used, win.limit ?? 0, poolBarW);
+      const label = win.limit ? `${win.used}/${win.limit}` : String(win.used);
+      let reset = '';
+      if (win.resetInMs !== undefined && win.used > 0) {
+        reset = theme.dim(` ${formatCountdown(win.resetInMs)}`);
+      }
+      segments.push(`${theme.dim(padRight(win.label, 4))}${bar} ${padRight(label, 6)}${reset}`);
+    }
 
-    poolLines.push('');
-  }
-  if (poolLines.length > 0 && poolLines[poolLines.length - 1] === '') {
-    poolLines.pop();
+    const active = `${summary.activeCount}/${summary.maxConcurrent}`;
+    poolLines.push(`${provColor(padRight(pool.provider, 11))}${theme.dim(active)}  ${segments.join('  ')}`);
   }
   const poolPanelH = poolLines.length + 2;
   const availRows = rows - curRow - 2;
-  const poolH = Math.min(poolPanelH, Math.floor(availRows * 0.4));
-  renderPanel(buf, curRow, innerLeft, innerW, poolH, 'Pool Usage', poolLines);
+  const poolH = Math.min(poolPanelH, Math.max(poolLines.length + 2, 4));
+  renderPanel(buf, curRow, innerLeft, innerW, Math.min(poolH, availRows), 'Pools', poolLines);
 
   curRow += poolH + 1;
 
@@ -292,6 +308,10 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
             completedAt: new Date().toISOString(),
           });
           await ctx.storage.save(ctx.queue.get(task.id)!);
+          sortedTasks = getSortedTasks();
+          if (selectedIdx >= sortedTasks.length) {
+            selectedIdx = Math.max(0, sortedTasks.length - 1);
+          }
         }
       }
     },
