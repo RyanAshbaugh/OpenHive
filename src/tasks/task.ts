@@ -18,6 +18,8 @@ export interface Task {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  workerId?: string;
+  workerState?: string;
 }
 
 export function createTask(prompt: string, id: string, options?: {

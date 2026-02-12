@@ -100,6 +100,7 @@ async function runOrchestrated(
       llmEscalationTool: orchConfig.llmEscalationTool,
       llmContextLines: orchConfig.llmContextLines,
     },
+    taskStorage: ctx.storage,
     onEvent: (event) => {
       if (isJsonOutput()) return;
       switch (event.type) {
@@ -130,7 +131,7 @@ async function runOrchestrated(
     await orchestrator.shutdown();
   }
 
-  // Update task status in queue and storage
+  // Orchestrator persists task state to storage — sync the in-memory queue
   const completed = orchestrator.isTaskCompleted(taskId);
   const failReason = orchestrator.getFailureReason(taskId);
   ctx.queue.update(taskId, {
@@ -138,7 +139,6 @@ async function runOrchestrated(
     completedAt: new Date().toISOString(),
     error: failReason,
   });
-  await ctx.storage.save(ctx.queue.get(taskId)!);
 
   if (isJsonOutput()) {
     printJson({

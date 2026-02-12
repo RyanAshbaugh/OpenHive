@@ -149,6 +149,7 @@ export function registerLaunchCommand(program: Command): void {
               llmContextLines: orchConfig.llmContextLines,
             },
             sessionDir,
+            taskStorage: ctx.storage,
             onEvent: (event) => {
               if (event.type === 'worker_created') {
                 console.log(chalk.dim(`  Worker ${event.workerId} (${event.tool}) started`));

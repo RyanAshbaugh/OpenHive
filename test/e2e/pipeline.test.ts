@@ -18,9 +18,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
 import { createTask } from '../../src/tasks/task.js';
+import { TaskStorage } from '../../src/tasks/storage.js';
 import type { OrchestratorEvent } from '../../src/orchestrator/types.js';
 
 import { checkAgentAvailability, allAgentsAvailable, unavailableSummary } from './helpers/agent-check.js';
@@ -71,6 +73,9 @@ async function runPipeline(
       await options.setupRepo(repo);
     }
 
+    // Create task storage for persisting task state to the global dir
+    const taskStorage = new TaskStorage(join(homedir(), '.openhive', 'tasks'));
+
     // Create orchestrator with worktree support
     const orchestrator = new Orchestrator({
       config: {
@@ -83,6 +88,7 @@ async function runPipeline(
         idleSettlingMs: 3000,
         stuckTimeoutMs: 180_000, // 3 min stuck timeout for real agents
       },
+      taskStorage,
       onEvent: (e) => {
         events.push(e);
         if (e.type === 'task_completed' || e.type === 'task_failed') {

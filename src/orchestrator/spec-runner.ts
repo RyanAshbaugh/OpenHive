@@ -15,6 +15,7 @@ import { sleep } from './tmux.js';
 import { writeSession } from '../specs/session.js';
 import type { ProjectSpec } from '../specs/schema.js';
 import type { OrchestratorConfig } from './types.js';
+import type { TaskStorage } from '../tasks/storage.js';
 import type { LaunchSession } from '../specs/session.js';
 import type {
   SpecRunResult,
@@ -29,6 +30,8 @@ export interface OrchestratedSpecOptions {
   sessionDir?: string;
   /** Callback for orchestrator events */
   onEvent?: import('./types.js').OrchestratorEventHandler;
+  /** Task storage for persisting task state to disk */
+  taskStorage?: TaskStorage;
 }
 
 /**
@@ -68,6 +71,7 @@ export async function runSpecOrchestrated(
   const orchestrator = new Orchestrator({
     config: options?.config,
     onEvent: options?.onEvent,
+    taskStorage: options?.taskStorage,
   });
 
   try {

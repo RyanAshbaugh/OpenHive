@@ -3,6 +3,7 @@ import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
 import type { OrchestratorEvent } from '../../src/orchestrator/types.js';
 import { DEFAULT_ORCHESTRATOR_CONFIG } from '../../src/orchestrator/types.js';
 import { createTask } from '../../src/tasks/task.js';
+import type { TaskStorage } from '../../src/tasks/storage.js';
 
 /**
  * These tests exercise the Orchestrator's dispatch logic, worker recycling,
@@ -155,6 +156,77 @@ describe('Orchestrator', () => {
       });
       expect(orchestrator.isRunning).toBe(false);
     });
+  });
+});
+
+describe('Orchestrator: taskStorage integration', () => {
+  it('accepts taskStorage option without error', () => {
+    const mockStorage = {
+      save: vi.fn().mockResolvedValue(undefined),
+      load: vi.fn().mockResolvedValue(null),
+      loadAll: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(true),
+      deleteAll: vi.fn().mockResolvedValue(0),
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+    } as unknown as TaskStorage;
+
+    const orchestrator = new Orchestrator({
+      config: { maxWorkers: 3 },
+      taskStorage: mockStorage,
+    });
+    expect(orchestrator.isRunning).toBe(false);
+  });
+
+  it('persists task on queue via taskStorage', async () => {
+    const mockStorage = {
+      save: vi.fn().mockResolvedValue(undefined),
+      load: vi.fn().mockResolvedValue(null),
+      loadAll: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(true),
+      deleteAll: vi.fn().mockResolvedValue(0),
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+    } as unknown as TaskStorage;
+
+    const orchestrator = new Orchestrator({
+      config: { maxWorkers: 3 },
+      taskStorage: mockStorage,
+    });
+
+    const task = makeTask('persist-test');
+    orchestrator.queueTask(task);
+
+    // queueTask calls persistTask which is async fire-and-forget
+    // Give it a tick to resolve
+    await new Promise(r => setTimeout(r, 10));
+    expect(mockStorage.save).toHaveBeenCalledWith(task);
+  });
+
+  it('persists failed task state for unsupported tools', async () => {
+    const mockStorage = {
+      save: vi.fn().mockResolvedValue(undefined),
+      load: vi.fn().mockResolvedValue(null),
+      loadAll: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(true),
+      deleteAll: vi.fn().mockResolvedValue(0),
+      ensureDir: vi.fn().mockResolvedValue(undefined),
+    } as unknown as TaskStorage;
+
+    const orchestrator = new Orchestrator({
+      config: { maxWorkers: 3 },
+      taskStorage: mockStorage,
+    });
+
+    const task = makeTask('fail-test', 'unsupported-tool');
+    orchestrator.queueTask(task);
+
+    await orchestrator.tick();
+
+    // Should have been called at least twice: once on queue, once on fail
+    expect(mockStorage.save).toHaveBeenCalledTimes(2);
+    // Last call should have the failed status
+    const lastCall = mockStorage.save.mock.calls[1][0];
+    expect(lastCall.status).toBe('failed');
+    expect(lastCall.error).toContain('Unsupported tool');
   });
 });
 

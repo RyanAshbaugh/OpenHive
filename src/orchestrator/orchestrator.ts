@@ -11,6 +11,7 @@
  */
 
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import { WorkerSession } from './worker.js';
 import { ResponseEngine } from './response.js';
@@ -29,10 +30,12 @@ import type {
 } from './types.js';
 import { DEFAULT_ORCHESTRATOR_CONFIG as DEFAULTS } from './types.js';
 import type { Task } from '../tasks/task.js';
+import type { TaskStorage } from '../tasks/storage.js';
 
 export interface OrchestratorOptions {
   config?: Partial<OrchestratorConfig>;
   onEvent?: OrchestratorEventHandler;
+  taskStorage?: TaskStorage;
 }
 
 export class Orchestrator {
@@ -41,6 +44,7 @@ export class Orchestrator {
   private responseEngines: Map<string, ResponseEngine> = new Map();
   private running = false;
   private onEvent?: OrchestratorEventHandler;
+  private taskStorage?: TaskStorage;
 
   /** Tasks queued for dispatch */
   private pendingTasks: Task[] = [];
@@ -76,6 +80,7 @@ export class Orchestrator {
     }
     this.config = { ...DEFAULTS, ...overrides } as OrchestratorConfig;
     this.onEvent = options?.onEvent;
+    this.taskStorage = options?.taskStorage;
   }
 
   /**
@@ -90,6 +95,7 @@ export class Orchestrator {
       this.taskDependencies.set(task.id, dependsOn);
     }
     logger.info(`Orchestrator: queued task ${task.id}`);
+    this.persistTask(task);
   }
 
   /**
@@ -252,6 +258,10 @@ export class Orchestrator {
         this.pendingTasks.splice(i, 1);
         i--;
         this.failedTasks.set(task.id, `Unsupported tool: ${tool}`);
+        task.status = 'failed';
+        task.error = `Unsupported tool: ${tool}`;
+        task.completedAt = new Date().toISOString();
+        this.persistTask(task);
         this.emit({ type: 'task_failed', workerId: '', taskId: task.id, reason: `Unsupported tool: ${tool}` });
         continue;
       }
@@ -282,6 +292,10 @@ export class Orchestrator {
         logger.error(`Orchestrator: giving up on task ${task.id} (tool=${tool}): ${reason}`);
         dispatched.add(task.id); // Remove from pending
         this.failedTasks.set(task.id, reason);
+        task.status = 'failed';
+        task.error = reason;
+        task.completedAt = new Date().toISOString();
+        this.persistTask(task);
         this.emit({ type: 'task_failed', workerId: '', taskId: task.id, reason });
         continue;
       }
@@ -319,6 +333,11 @@ export class Orchestrator {
         await worker.assignTask(task);
         dispatched.add(task.id);
         this.dispatchRetries.delete(task.id);
+        // Persist running state
+        task.status = 'running';
+        task.workerId = worker.info.id;
+        task.startedAt = new Date().toISOString();
+        await this.persistTask(task);
         this.emit({ type: 'task_assigned', workerId: worker.info.id, taskId: task.id });
       } catch (err) {
         logger.error(`Failed to assign task ${task.id} to worker ${worker.info.id}: ${err}`);
@@ -354,6 +373,12 @@ export class Orchestrator {
           const from = worker.info.state;
           worker.info.state = snapshot.state;
           this.emit({ type: 'state_changed', workerId: id, from, to: snapshot.state });
+
+          // Persist workerState on the assigned task
+          if (worker.assignment) {
+            worker.assignment.task.workerState = snapshot.state;
+            await this.persistTask(worker.assignment.task);
+          }
 
           // Rate limit coordination: when one worker hits a rate limit,
           // set a cooldown for all workers of that tool/provider
@@ -443,11 +468,19 @@ export class Orchestrator {
 
       case 'mark_complete': {
         const taskId = worker.assignment?.task.id;
+        const completedTask = worker.assignment?.task;
         worker.markTaskComplete();
         if (taskId) {
           this.completedTaskIds.add(taskId);
           // Record affinity: this task was completed by this worker
           this.taskWorkerAffinity.set(taskId, worker.info.id);
+          // Persist completed state
+          if (completedTask) {
+            completedTask.status = 'completed';
+            completedTask.completedAt = new Date().toISOString();
+            completedTask.workerState = undefined;
+            await this.persistTask(completedTask);
+          }
           this.emit({ type: 'task_completed', workerId: worker.info.id, taskId });
         }
         // Worker recycling: restart after maxTasksPerWorker tasks
@@ -465,9 +498,18 @@ export class Orchestrator {
 
       case 'mark_failed': {
         const taskId = worker.assignment?.task.id;
+        const failedTask = worker.assignment?.task;
         worker.markTaskFailed(action.reason);
         if (taskId) {
           this.failedTasks.set(taskId, action.reason);
+          // Persist failed state
+          if (failedTask) {
+            failedTask.status = 'failed';
+            failedTask.completedAt = new Date().toISOString();
+            failedTask.error = action.reason;
+            failedTask.workerState = undefined;
+            await this.persistTask(failedTask);
+          }
           this.emit({
             type: 'task_failed',
             workerId: worker.info.id,
@@ -585,7 +627,7 @@ export class Orchestrator {
   // ─── Internal: Session State File ──────────────────────────────────────
 
   private sessionStateFile(): string {
-    return join(process.cwd(), '.openhive', 'orchestration-state.json');
+    return join(homedir(), '.openhive', 'orchestration-state.json');
   }
 
   private async writeSessionState(): Promise<void> {
@@ -628,6 +670,16 @@ export class Orchestrator {
       await writeFile(this.sessionStateFile(), JSON.stringify(state, null, 2), 'utf-8');
     } catch {
       // ignore
+    }
+  }
+
+  private async persistTask(task: Task): Promise<void> {
+    if (this.taskStorage) {
+      try {
+        await this.taskStorage.save(task);
+      } catch (err) {
+        logger.debug(`Failed to persist task ${task.id}: ${err}`);
+      }
     }
   }
 

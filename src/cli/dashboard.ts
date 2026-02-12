@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import chalk from 'chalk';
 import type { AppContext } from './context.js';
@@ -45,7 +46,7 @@ function shortenReset(s: string): string {
 
 async function loadOrchestrationState(): Promise<OrchestrationSessionState | null> {
   try {
-    const filePath = join(process.cwd(), '.openhive', 'orchestration-state.json');
+    const filePath = join(homedir(), '.openhive', 'orchestration-state.json');
     const raw = await readFile(filePath, 'utf-8');
     const state = JSON.parse(raw) as OrchestrationSessionState;
     // Ignore stale state files (>30s old or stopped)
@@ -268,38 +269,13 @@ function renderOverview(
 
   curRow += agentPanelH + 1;
 
-  // ── Workers panel (only when orchestrator is active) ──
-  if (orchState && orchState.workers.length > 0) {
-    const workerLines = orchState.workers.map(w => {
-      const dot = workerStateDot(w.state);
-      const provColor = theme.providers[
-        w.tool === 'claude' ? 'anthropic'
-        : w.tool === 'codex' ? 'openai'
-        : w.tool === 'gemini' ? 'google'
-        : w.tool
-      ] ?? chalk.white;
-      const toolStr = provColor(padRight(w.tool, 8));
-      const stateStr = padRight(w.state, 18);
-      let elapsedStr = '';
-      if (w.assignedAt && w.taskId) {
-        const elapsed = Math.floor((Date.now() - w.assignedAt) / 1000);
-        elapsedStr = theme.dim(elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`);
-      }
-      const elapsedCol = padRight(elapsedStr, 6);
-      const promptW = innerW - 42;
-      const taskStr = w.taskPrompt
-        ? theme.dim(w.taskPrompt.length > promptW ? w.taskPrompt.slice(0, promptW - 3) + '...' : w.taskPrompt)
-        : theme.dim('idle');
-      return `${dot} ${toolStr} ${stateStr} ${elapsedCol} ${taskStr}`;
-    });
-
-    const statsLine = `${theme.dim('pending:')} ${orchState.pendingTaskCount}  ${theme.dim('done:')} ${orchState.completedTaskCount}  ${theme.dim('failed:')} ${orchState.failedTaskCount}`;
-    workerLines.push('');
-    workerLines.push(statsLine);
-
-    const workerPanelH = Math.max(workerLines.length + 2, 4);
-    renderPanel(buf, curRow, innerLeft, innerW, workerPanelH, 'Workers', workerLines);
-    curRow += workerPanelH + 1;
+  // ── Orchestration status line (compact, when orchestrator is active) ──
+  if (orchState && orchState.status === 'running') {
+    const workingCount = orchState.workers.filter(w => w.taskId).length;
+    const idleCount = orchState.workers.filter(w => !w.taskId).length;
+    const orchLine = `${theme.info('Orchestration:')} running  ${workingCount} working, ${idleCount} idle  ${theme.dim('pending:')} ${orchState.pendingTaskCount}  ${theme.dim('done:')} ${orchState.completedTaskCount}  ${theme.dim('failed:')} ${orchState.failedTaskCount}`;
+    buf.write(curRow, innerLeft, orchLine);
+    curRow += 2;
   }
 
   // ── Pool panel ──
@@ -327,9 +303,12 @@ function renderOverview(
   const recent = sortedTasks.slice(0, taskPanelH - 2);
   const recentLines = recent.map((t, i) => {
     const isSelected = i === selectedIdx;
-    const dot = statusDot(t.status);
+    // For orchestrated tasks, use workerState-aware dot; otherwise use status dot
+    const dot = t.workerId ? workerStateDot(t.workerState ?? t.status) : statusDot(t.status);
     const id = t.id.slice(0, 6);
-    const status = padRight(t.status, 10);
+    // Show workerState when available (more granular), otherwise show task status
+    const displayStatus = t.workerState ?? t.status;
+    const status = padRight(displayStatus, 10);
     const agent = padRight(t.agent ?? '-', 8);
     const dur = t.durationMs
       ? `${(t.durationMs / 1000).toFixed(1)}s`
