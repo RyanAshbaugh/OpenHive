@@ -585,8 +585,7 @@ export class Orchestrator {
   // ─── Internal: Session State File ──────────────────────────────────────
 
   private sessionStateFile(): string {
-    const root = this.config.repoRoot ?? process.cwd();
-    return join(root, '.openhive', 'orchestration-state.json');
+    return join(process.cwd(), '.openhive', 'orchestration-state.json');
   }
 
   private async writeSessionState(): Promise<void> {
@@ -599,6 +598,7 @@ export class Orchestrator {
         taskId: w.info.assignment?.task.id,
         taskPrompt: w.info.assignment?.task.prompt.slice(0, 120),
         tasksCompleted: w.info.tasksCompleted,
+        assignedAt: w.info.assignment?.assignedAt,
       })),
       pendingTaskCount: this.pendingTasks.length,
       completedTaskCount: this.completedTaskIds.size,

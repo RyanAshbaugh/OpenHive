@@ -226,6 +226,7 @@ export interface OrchestrationWorkerState {
   taskId?: string;
   taskPrompt?: string;
   tasksCompleted: number;
+  assignedAt?: number;
 }
 
 export interface OrchestrationSessionState {

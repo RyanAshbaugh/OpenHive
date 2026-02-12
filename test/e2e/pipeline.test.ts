@@ -135,7 +135,9 @@ async function runPipeline(
     }
 
     // Shutdown orchestrator (stops workers, kills tmux session)
-    await orchestrator.shutdown();
+    if (!process.env.OPENHIVE_KEEP_ARTIFACTS) {
+      await orchestrator.shutdown();
+    }
 
     // Ensure we're on main branch
     await git(repo.root, 'checkout', 'main');
@@ -172,7 +174,14 @@ async function runPipeline(
     console.log(`  [e2e] All ${expectations.length} file expectations passed`);
 
   } finally {
-    await repo.cleanup();
+    if (process.env.OPENHIVE_KEEP_ARTIFACTS) {
+      console.log(`  [e2e] Artifacts preserved:`);
+      console.log(`  [e2e]   Repo: ${repo.root}`);
+      console.log(`  [e2e]   Tmux: tmux attach -t openhive-orch`);
+      console.log(`  [e2e]   Logs: ${repo.root}/.openhive/logs/`);
+    } else {
+      await repo.cleanup();
+    }
   }
 }
 

@@ -10,7 +10,7 @@ import { getCachedProbeResults, loadProbeCache, isProbing, cleanupProbeSession }
 import type { OrchestrationSessionState } from '../orchestrator/types.js';
 import {
   theme, BOX, progressBar, statusDot,
-  ScreenBuffer, stripAnsi, padRight, renderPanel,
+  ScreenBuffer, stripAnsi, sliceVisible, padRight, renderPanel,
   runTuiLoop,
 } from './tui.js';
 
@@ -131,7 +131,8 @@ function renderPoolTool(
       const age = Date.now() - new Date(probe.probedAt).getTime();
       const stale = age > 5 * 60_000 ? theme.dim(' *') : '';
 
-      lines.push(`${provColor(padRight(pool.provider, 11))}${segments.join('  ')}${stale}`);
+      const raw = `${provColor(padRight(pool.provider, 11))}${segments.join('  ')}${stale}`;
+      lines.push(stripAnsi(raw).length > innerW ? sliceVisible(raw, 0, innerW) : raw);
       continue;
     }
 
@@ -191,7 +192,8 @@ function renderPoolOpenHive(
     const slots = summary.activeCount > 0
       ? theme.info(`${summary.activeCount}/${summary.maxConcurrent}`)
       : theme.dim('idle');
-    lines.push(`${provColor(padRight(pool.provider, 11))}${padRight(slots, 6)} ${segments.join('  ')}`);
+    const raw = `${provColor(padRight(pool.provider, 11))}${padRight(slots, 6)} ${segments.join('  ')}`;
+    lines.push(stripAnsi(raw).length > innerW ? sliceVisible(raw, 0, innerW) : raw);
   }
 
   return lines;
@@ -219,7 +221,7 @@ function renderOverview(
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
   const titleBar = ' OpenHive ';
-  const outerW = Math.min(cols, 80);
+  const outerW = cols;
   const outerLeft = Math.max(0, Math.floor((cols - outerW) / 2));
   const topBarPad = outerW - 2 - titleBar.length - timeStr.length - 3;
   buf.write(0, outerLeft, theme.border(BOX.tl + BOX.h) + theme.title(titleBar) + theme.border(BOX.h.repeat(Math.max(0, topBarPad)) + ' ') + theme.dim(timeStr) + theme.border(' ' + BOX.tr));
@@ -278,11 +280,17 @@ function renderOverview(
       ] ?? chalk.white;
       const toolStr = provColor(padRight(w.tool, 8));
       const stateStr = padRight(w.state, 18);
-      const promptW = innerW - 36;
+      let elapsedStr = '';
+      if (w.assignedAt && w.taskId) {
+        const elapsed = Math.floor((Date.now() - w.assignedAt) / 1000);
+        elapsedStr = theme.dim(elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`);
+      }
+      const elapsedCol = padRight(elapsedStr, 6);
+      const promptW = innerW - 42;
       const taskStr = w.taskPrompt
         ? theme.dim(w.taskPrompt.length > promptW ? w.taskPrompt.slice(0, promptW - 3) + '...' : w.taskPrompt)
         : theme.dim('idle');
-      return `${dot} ${toolStr} ${stateStr} ${taskStr}`;
+      return `${dot} ${toolStr} ${stateStr} ${elapsedCol} ${taskStr}`;
     });
 
     const statsLine = `${theme.dim('pending:')} ${orchState.pendingTaskCount}  ${theme.dim('done:')} ${orchState.completedTaskCount}  ${theme.dim('failed:')} ${orchState.failedTaskCount}`;
@@ -368,7 +376,7 @@ function renderStreamView(
   rows: number,
 ): string {
   const buf = new ScreenBuffer(cols, rows);
-  const outerW = Math.min(cols, 80);
+  const outerW = cols;
   const outerLeft = Math.max(0, Math.floor((cols - outerW) / 2));
   const innerW = outerW - 2;
 
@@ -515,6 +523,17 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
         const tasks = await ctx.storage.loadAll();
         ctx.queue.loadAll(tasks);
         await ctx.poolTracker.reloadUsageStore();
+
+        // Auto-cleanup failed tasks older than 1 hour
+        const oneHourAgo = Date.now() - 3_600_000;
+        for (const task of tasks) {
+          if (task.status === 'failed' && task.completedAt) {
+            const completedTime = new Date(task.completedAt).getTime();
+            if (completedTime < oneHourAgo) {
+              await ctx.storage.delete(task.id);
+            }
+          }
+        }
       } catch {
         // Ignore load errors
       }

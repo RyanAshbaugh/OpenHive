@@ -17,6 +17,8 @@
     "test:e2e:tier1": "vitest run --config vitest.e2e.config.ts -t 'Tier 1'",
     "test:e2e:tier2": "vitest run --config vitest.e2e.config.ts -t 'Tier 2'",
     "test:e2e:tier3": "vitest run --config vitest.e2e.config.ts -t 'Tier 3'",
+    "test:e2e:keep": "OPENHIVE_KEEP_ARTIFACTS=1 vitest run --config vitest.e2e.config.ts",
+    "test:e2e:cleanup": "tmux kill-session -t openhive-orch 2>/dev/null; echo 'Cleaned up'",
     "lint": "tsc --noEmit"
   },
   "keywords": ["ai", "agents", "orchestrator", "cli", "multi-agent"],
