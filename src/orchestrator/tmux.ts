@@ -269,8 +269,11 @@ export async function waitForReady(
     const output = stripAnsi(raw);
 
     // Check startup dialog BEFORE readyPattern — dialogs can contain
-    // prompt characters (like ❯) that would false-match the ready pattern
-    if (startupDialogPattern && startupDialogPattern.test(output)) {
+    // prompt characters (like ❯) that would false-match the ready pattern.
+    // Only check the last few lines so dismissed dialogs in scrollback
+    // don't keep matching forever.
+    const tailLines = output.split('\n').filter(l => l.trim()).slice(-5).join('\n');
+    if (startupDialogPattern && startupDialogPattern.test(tailLines)) {
       logger.info('Startup dialog detected, sending Enter to dismiss');
       await sendKeys(target, ['Enter']);
       await sleep(2000);

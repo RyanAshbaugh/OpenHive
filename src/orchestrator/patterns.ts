@@ -105,7 +105,7 @@ const codexStatePatterns: StatePattern[] = [
   },
   {
     name: 'codex:idle',
-    pattern: /OpenAI Codex|>\s*$/m,
+    pattern: /OpenAI Codex|\? for shortcuts|context left|[>›]\s*$/m,
     state: 'idle',
     priority: 1,
   },

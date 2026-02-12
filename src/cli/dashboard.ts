@@ -232,7 +232,7 @@ function renderOverview(
     buf.write(r, outerLeft + outerW - 1, theme.border(BOX.v));
   }
 
-  const keys = '  j/k select  Enter stream  p pools  x kill  r refresh  q quit';
+  const keys = '  j/k select  Enter stream  c clear done  p pools  x kill  r refresh  q quit';
   const bottomPad = outerW - 2 - keys.length;
   buf.write(rows - 1, outerLeft, theme.border(BOX.bl) + theme.dim(keys) + theme.border(BOX.h.repeat(Math.max(0, bottomPad)) + BOX.br));
 
@@ -395,6 +395,7 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
   let toolUsage = new Map<string, ToolUsageReport>();
   let probeResults = new Map<string, ProbeResult>();
   let orchState: OrchestrationSessionState | null = null;
+  const dismissedTaskIds = new Set<string>();
 
   // Load persisted probe cache from disk (instant — shows last-known bars)
   probeResults = await loadProbeCache();
@@ -417,6 +418,11 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
     });
   };
 
+  let displayTasks: Task[] = [];
+  const updateDisplayTasks = () => {
+    displayTasks = sortedTasks.filter(t => !dismissedTaskIds.has(t.id));
+  };
+
   const loadLogForTask = async (taskId: string) => {
     const logPath = join(process.cwd(), '.openhive', 'logs', `${taskId}.log`);
     try {
@@ -433,7 +439,7 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       if (mode === 'stream') {
         return renderStreamView(ctx, streamTaskId, logContent, cols, rows);
       }
-      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks, poolMode, toolUsage, probeResults, orchState);
+      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, displayTasks, poolMode, toolUsage, probeResults, orchState);
     },
     onKey: async (key) => {
       if (mode === 'stream') {
@@ -461,19 +467,19 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       if (key === 'p') {
         poolMode = poolMode === 'tool' ? 'openhive' : 'tool';
       }
-      if (key === 'j' && selectedIdx < sortedTasks.length - 1) {
+      if (key === 'j' && selectedIdx < displayTasks.length - 1) {
         selectedIdx++;
-        const task = sortedTasks[selectedIdx];
+        const task = displayTasks[selectedIdx];
         if (task) await loadLogForTask(task.id);
       }
       if (key === 'k' && selectedIdx > 0) {
         selectedIdx--;
-        const task = sortedTasks[selectedIdx];
+        const task = displayTasks[selectedIdx];
         if (task) await loadLogForTask(task.id);
       }
       // Enter: switch to full-screen stream view
       if (key === '\r' || key === '\n') {
-        const task = sortedTasks[selectedIdx];
+        const task = displayTasks[selectedIdx];
         if (task) {
           mode = 'stream';
           streamTaskId = task.id;
@@ -482,7 +488,7 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       }
       // x: kill a running task
       if (key === 'x') {
-        const task = sortedTasks[selectedIdx];
+        const task = displayTasks[selectedIdx];
         if (task && task.status === 'running') {
           ctx.queue.update(task.id, {
             status: 'failed',
@@ -491,9 +497,22 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
           });
           await ctx.storage.save(ctx.queue.get(task.id)!);
           sortedTasks = getSortedTasks();
-          if (selectedIdx >= sortedTasks.length) {
-            selectedIdx = Math.max(0, sortedTasks.length - 1);
+          updateDisplayTasks();
+          if (selectedIdx >= displayTasks.length) {
+            selectedIdx = Math.max(0, displayTasks.length - 1);
           }
+        }
+      }
+      // c: clear completed tasks from display
+      if (key === 'c') {
+        for (const t of sortedTasks) {
+          if (t.status === 'completed') {
+            dismissedTaskIds.add(t.id);
+          }
+        }
+        updateDisplayTasks();
+        if (selectedIdx >= displayTasks.length) {
+          selectedIdx = Math.max(0, displayTasks.length - 1);
         }
       }
     },
@@ -517,8 +536,9 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
         // Ignore load errors
       }
       sortedTasks = getSortedTasks();
-      if (selectedIdx >= sortedTasks.length) {
-        selectedIdx = Math.max(0, sortedTasks.length - 1);
+      updateDisplayTasks();
+      if (selectedIdx >= displayTasks.length) {
+        selectedIdx = Math.max(0, displayTasks.length - 1);
       }
       tickCount++;
       // Reload local file usage every 10 ticks (~5 seconds)
@@ -536,8 +556,8 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       // Reload log for current view
       if (mode === 'stream' && streamTaskId) {
         await loadLogForTask(streamTaskId);
-      } else if (sortedTasks[selectedIdx]) {
-        await loadLogForTask(sortedTasks[selectedIdx].id);
+      } else if (displayTasks[selectedIdx]) {
+        await loadLogForTask(displayTasks[selectedIdx].id);
       } else {
         logContent = '';
       }
