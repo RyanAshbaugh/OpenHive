@@ -7,6 +7,7 @@ import type { ToolUsageReport } from '../pool/tool-usage.js';
 import { readAllToolUsage } from '../pool/tool-usage.js';
 import type { ProbeResult } from '../pool/usage-probe.js';
 import { getCachedProbeResults, loadProbeCache, isProbing, cleanupProbeSession } from '../pool/usage-probe.js';
+import type { OrchestrationSessionState } from '../orchestrator/types.js';
 import {
   theme, BOX, progressBar, statusDot,
   ScreenBuffer, stripAnsi, padRight, renderPanel,
@@ -40,6 +41,36 @@ function shortenReset(s: string): string {
     .replace(/\([A-Za-z/_]+\)/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+async function loadOrchestrationState(): Promise<OrchestrationSessionState | null> {
+  try {
+    const filePath = join(process.cwd(), '.openhive', 'orchestration-state.json');
+    const raw = await readFile(filePath, 'utf-8');
+    const state = JSON.parse(raw) as OrchestrationSessionState;
+    // Ignore stale state files (>30s old or stopped)
+    if (state.status === 'stopped') return null;
+    const age = Date.now() - new Date(state.updatedAt).getTime();
+    if (age > 30_000) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function workerStateDot(state: string): string {
+  switch (state) {
+    case 'idle': return theme.success('●');
+    case 'working': return theme.info('●');
+    case 'waiting_approval': return theme.warning('●');
+    case 'waiting_input': return theme.warning('●');
+    case 'stuck': return theme.error('●');
+    case 'rate_limited': return theme.error('●');
+    case 'error': return theme.error('✗');
+    case 'starting': return theme.dim('●');
+    case 'dead': return theme.dim('✗');
+    default: return theme.dim('○');
+  }
 }
 
 type PoolMode = 'tool' | 'openhive';
@@ -179,6 +210,7 @@ function renderOverview(
   poolMode: PoolMode,
   toolUsage: Map<string, ToolUsageReport>,
   probeResults: Map<string, ProbeResult>,
+  orchState: OrchestrationSessionState | null,
 ): string {
   const buf = new ScreenBuffer(cols, rows);
   const tasks = ctx.queue.list();
@@ -233,6 +265,34 @@ function renderOverview(
   renderPanel(buf, curRow, innerLeft + agentPanelW + 1, taskPanelW, agentPanelH, 'Summary', taskSummaryLines);
 
   curRow += agentPanelH + 1;
+
+  // ── Workers panel (only when orchestrator is active) ──
+  if (orchState && orchState.workers.length > 0) {
+    const workerLines = orchState.workers.map(w => {
+      const dot = workerStateDot(w.state);
+      const provColor = theme.providers[
+        w.tool === 'claude' ? 'anthropic'
+        : w.tool === 'codex' ? 'openai'
+        : w.tool === 'gemini' ? 'google'
+        : w.tool
+      ] ?? chalk.white;
+      const toolStr = provColor(padRight(w.tool, 8));
+      const stateStr = padRight(w.state, 18);
+      const promptW = innerW - 36;
+      const taskStr = w.taskPrompt
+        ? theme.dim(w.taskPrompt.length > promptW ? w.taskPrompt.slice(0, promptW - 3) + '...' : w.taskPrompt)
+        : theme.dim('idle');
+      return `${dot} ${toolStr} ${stateStr} ${taskStr}`;
+    });
+
+    const statsLine = `${theme.dim('pending:')} ${orchState.pendingTaskCount}  ${theme.dim('done:')} ${orchState.completedTaskCount}  ${theme.dim('failed:')} ${orchState.failedTaskCount}`;
+    workerLines.push('');
+    workerLines.push(statsLine);
+
+    const workerPanelH = Math.max(workerLines.length + 2, 4);
+    renderPanel(buf, curRow, innerLeft, innerW, workerPanelH, 'Workers', workerLines);
+    curRow += workerPanelH + 1;
+  }
 
   // ── Pool panel ──
   const probingIndicator = isProbing() ? ' ...' : '';
@@ -347,6 +407,7 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
   let poolMode: PoolMode = 'tool';
   let toolUsage = new Map<string, ToolUsageReport>();
   let probeResults = new Map<string, ProbeResult>();
+  let orchState: OrchestrationSessionState | null = null;
 
   // Load persisted probe cache from disk (instant — shows last-known bars)
   probeResults = await loadProbeCache();
@@ -385,7 +446,7 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       if (mode === 'stream') {
         return renderStreamView(ctx, streamTaskId, logContent, cols, rows);
       }
-      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks, poolMode, toolUsage, probeResults);
+      return renderOverview(ctx, agents, cols, rows, selectedIdx, logContent, sortedTasks, poolMode, toolUsage, probeResults, orchState);
     },
     onKey: async (key) => {
       if (mode === 'stream') {
@@ -472,6 +533,8 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
       }
       // Refresh probe cache (returns immediately, triggers bg probe if stale)
       probeResults = getCachedProbeResults();
+      // Load orchestration session state
+      orchState = await loadOrchestrationState();
       // Reload log for current view
       if (mode === 'stream' && streamTaskId) {
         await loadLogForTask(streamTaskId);

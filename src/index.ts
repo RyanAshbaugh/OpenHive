@@ -43,6 +43,8 @@ export { createTask } from './tasks/task.js';
 // Git
 export { createWorktree, listWorktrees, getWorktreeDiff, removeWorktree } from './git/worktree.js';
 export { mergeWorktree } from './git/merge.js';
+export { createPullRequest, isGhAvailable } from './git/pr.js';
+export type { PrResult } from './git/pr.js';
 
 // Specs
 export type { ProjectSpec, ServeConfig, TaskSpec, VerifyConfig, ScreenshotSpec } from './specs/schema.js';
@@ -61,3 +63,35 @@ export { takeScreenshot } from './verify/screenshot.js';
 export type { ScreenshotResult } from './verify/screenshot.js';
 export { assessScreenshot, findVisionAgent } from './verify/assess.js';
 export type { AssessmentResult } from './verify/assess.js';
+
+// Orchestrator
+export type {
+  WorkerState,
+  OrchestratorAction,
+  OrchestratorConfig,
+  OrchestratorEvent,
+  OrchestratorEventHandler,
+  TaskAssignment,
+  StateSnapshot,
+  StatePattern,
+  ActionRule,
+  ActionContext,
+  ToolOrchestrationProfile,
+  WorkerInfo,
+  LlmMetaCommand,
+  LlmResponse,
+  LlmEscalationResult,
+  LlmContext,
+  OrchestrationSessionState,
+  OrchestrationWorkerState,
+} from './orchestrator/types.js';
+export { DEFAULT_ORCHESTRATOR_CONFIG } from './orchestrator/types.js';
+export { Orchestrator } from './orchestrator/orchestrator.js';
+export type { OrchestratorOptions } from './orchestrator/orchestrator.js';
+export { WorkerSession } from './orchestrator/worker.js';
+export { StateDetector } from './orchestrator/state.js';
+export { ResponseEngine } from './orchestrator/response.js';
+export { buildProfile, supportedTools } from './orchestrator/patterns.js';
+export { buildLlmContext, parseLlmResponse } from './orchestrator/context.js';
+export { runSpecOrchestrated } from './orchestrator/spec-runner.js';
+export type { OrchestratedSpecOptions } from './orchestrator/spec-runner.js';

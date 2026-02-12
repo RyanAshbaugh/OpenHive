@@ -65,7 +65,8 @@ export const TOOL_CONTROLS: Record<string, ToolControl> = {
     dismissKey: 'Escape',
     captureDelayMs: 2000,
     captureScrollback: -60,
-    readyPattern: />\s*$/m,
+    readyPattern: /❯|>\s*$/m,
+    startupDialogPattern: /Enter to confirm|trust this|project instructions/i,
     notes:
       'Claude Code uses an autocomplete dropdown for slash commands. ' +
       'First Enter opens the menu, second Enter selects the highlighted item. ' +
@@ -91,7 +92,7 @@ export const TOOL_CONTROLS: Record<string, ToolControl> = {
     captureDelayMs: 2000,
     captureScrollback: -40,
     readyPattern: /OpenAI Codex/,
-    startupDialogPattern: /Update available|Try new model|Choose.*model/i,
+    startupDialogPattern: /Update available|Try new model|Choose.*model|Press enter to continue/i,
     notes:
       'Codex CLI also has autocomplete for slash commands. ' +
       'Double Ctrl+C to exit (single only clears input). ' +
@@ -115,6 +116,7 @@ export const TOOL_CONTROLS: Record<string, ToolControl> = {
     captureDelayMs: 3000,
     captureScrollback: -60,
     readyPattern: /Type your message|>\s/,
+    startupDialogPattern: /Do you trust this folder|Trust folder|trust this/i,
     notes:
       'Gemini CLI has autocomplete for slash commands (same double-Enter pattern). ' +
       'Ctrl+C quits the app but /quit is the clean exit. ' +
@@ -140,7 +142,7 @@ export const TOOL_CONTROLS: Record<string, ToolControl> = {
     dismissKey: 'Escape',
     captureDelayMs: 1000,
     captureScrollback: -30,
-    readyPattern: />\s*$/m,
+    readyPattern: /[>❯]\s*$/m,
     notes:
       'Cursor agent mode has no known interactive usage/status command. ' +
       'Usage tracking is not available via tmux probing.',

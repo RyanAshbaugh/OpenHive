@@ -27,6 +27,25 @@ export interface ProviderPoolConfig {
   weeklyLimit?: number;
 }
 
+export interface OrchestratorSchemaConfig {
+  /** Enable orchestrator mode (default false) */
+  enabled?: boolean;
+  /** Maximum concurrent workers (default 3) */
+  maxWorkers?: number;
+  /** Main loop tick interval in ms (default 2000) */
+  tickIntervalMs?: number;
+  /** Auto-approve tool use actions (default true) */
+  autoApprove?: boolean;
+  /** Time with no output change before marking stuck, in ms (default 120000) */
+  stuckTimeoutMs?: number;
+  /** Tool to use for LLM escalation calls (default 'claude') */
+  llmEscalationTool?: string;
+  /** Number of pane output lines to include in LLM context (default 40) */
+  llmContextLines?: number;
+  /** Max tasks per worker before recycling (default 0 = unlimited) */
+  maxTasksPerWorker?: number;
+}
+
 export interface OpenHiveConfig {
   agents: Record<string, AgentConfig>;
   pools: ProviderPoolConfig[];
@@ -35,4 +54,5 @@ export interface OpenHiveConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error' | 'silent';
   defaultAgent?: string;
   jsonOutput: boolean;
+  orchestrator?: OrchestratorSchemaConfig;
 }

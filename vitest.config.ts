@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 10000,
+    exclude: ['test/e2e/**', 'node_modules/**', 'dist/**'],
   },
 });

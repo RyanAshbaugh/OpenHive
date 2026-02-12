@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { getContext } from '../context.js';
 import { parseSpec } from '../../specs/parser.js';
 import { computeWaves, runSpec } from '../../specs/runner.js';
+import { runSpecOrchestrated } from '../../orchestrator/spec-runner.js';
 import { readSession } from '../../specs/session.js';
 import { runVerification } from '../../verify/runner.js';
 import { printSuccess, printError, printInfo, printWarning, printJson, isJsonOutput, printTable } from '../output.js';
@@ -16,10 +17,12 @@ export function registerLaunchCommand(program: Command): void {
     .option('--spec <path>', 'path to spec file (default: .openhive/spec.json5)')
     .option('--skip-verify', 'skip verification step')
     .option('--dry-run', 'show execution plan without dispatching')
+    .option('--orchestrated', 'use persistent tmux sessions instead of subprocess dispatch')
     .action(async (specFile: string | undefined, options: {
       spec?: string;
       skipVerify?: boolean;
       dryRun?: boolean;
+      orchestrated?: boolean;
     }) => {
       const specPath = resolve(specFile ?? options.spec ?? '.openhive/spec.json5');
 
@@ -97,7 +100,10 @@ export function registerLaunchCommand(program: Command): void {
       const ctx = await getContext();
       await ctx.registry.checkAll(ctx.config);
 
-      console.log(chalk.bold(`\nLaunching: ${spec.name}`));
+      const useOrchestrator = options.orchestrated || ctx.config.orchestrator?.enabled;
+      const modeTag = useOrchestrator ? chalk.cyan(' (orchestrated)') : '';
+
+      console.log(chalk.bold(`\nLaunching: ${spec.name}${modeTag}`));
       console.log(chalk.gray(`${spec.tasks.length} tasks in ${waves.length} waves\n`));
 
       // Run spec with inline progress
@@ -131,7 +137,27 @@ export function registerLaunchCommand(program: Command): void {
 
       let runResult;
       try {
-        runResult = await runSpec(spec, ctx.scheduler, ctx.queue, ctx.storage, { sessionDir });
+        if (useOrchestrator) {
+          const orchConfig = ctx.config.orchestrator ?? {};
+          runResult = await runSpecOrchestrated(spec, {
+            config: {
+              maxWorkers: orchConfig.maxWorkers,
+              autoApprove: orchConfig.autoApprove,
+              tickIntervalMs: orchConfig.tickIntervalMs,
+              stuckTimeoutMs: orchConfig.stuckTimeoutMs,
+              llmEscalationTool: orchConfig.llmEscalationTool,
+              llmContextLines: orchConfig.llmContextLines,
+            },
+            sessionDir,
+            onEvent: (event) => {
+              if (event.type === 'worker_created') {
+                console.log(chalk.dim(`  Worker ${event.workerId} (${event.tool}) started`));
+              }
+            },
+          });
+        } else {
+          runResult = await runSpec(spec, ctx.scheduler, ctx.queue, ctx.storage, { sessionDir });
+        }
         clearInterval(progressInterval);
       } catch (err) {
         clearInterval(progressInterval);

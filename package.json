@@ -13,6 +13,10 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:tier1": "vitest run --config vitest.e2e.config.ts -t 'Tier 1'",
+    "test:e2e:tier2": "vitest run --config vitest.e2e.config.ts -t 'Tier 2'",
+    "test:e2e:tier3": "vitest run --config vitest.e2e.config.ts -t 'Tier 3'",
     "lint": "tsc --noEmit"
   },
   "keywords": ["ai", "agents", "orchestrator", "cli", "multi-agent"],
