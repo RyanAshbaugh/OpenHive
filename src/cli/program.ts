@@ -11,6 +11,8 @@ import { registerReviewCommands } from './commands/review.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerLaunchCommand } from './commands/launch.js';
 import { registerWatchCommand } from './commands/watch.js';
+import { registerDevCommands } from './commands/dev.js';
+import { registerTestCommand } from './commands/test.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -38,6 +40,8 @@ function createProgram(): Command {
   registerDashboardCommand(program);
   registerLaunchCommand(program);
   registerWatchCommand(program);
+  registerDevCommands(program);
+  registerTestCommand(program);
 
   return program;
 }
