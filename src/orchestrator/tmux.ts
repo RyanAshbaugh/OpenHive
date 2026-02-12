@@ -264,20 +264,35 @@ export async function waitForReady(
   // Initial delay for tool to start rendering
   await sleep(2000);
 
+  // After dismissing a startup dialog, skip the dialog check for one poll
+  // cycle so stale pane content doesn't trigger a redundant Enter keypress.
+  let skipDialogCheck = false;
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const raw = await capturePane(target);
+    let raw: string;
+    try {
+      raw = await capturePane(target);
+    } catch {
+      // Window died (tool crashed during startup) — let caller retry
+      throw new Error(`Window ${target} died during startup`);
+    }
     const output = stripAnsi(raw);
 
     // Check startup dialog BEFORE readyPattern — dialogs can contain
     // prompt characters (like ❯) that would false-match the ready pattern.
     // Only check the last few lines so dismissed dialogs in scrollback
     // don't keep matching forever.
-    const tailLines = output.split('\n').filter(l => l.trim()).slice(-5).join('\n');
-    if (startupDialogPattern && startupDialogPattern.test(tailLines)) {
-      logger.info('Startup dialog detected, sending Enter to dismiss');
-      await sendKeys(target, ['Enter']);
-      await sleep(2000);
-      continue;
+    if (!skipDialogCheck) {
+      const tailLines = output.split('\n').filter(l => l.trim()).slice(-5).join('\n');
+      if (startupDialogPattern && startupDialogPattern.test(tailLines)) {
+        logger.info('Startup dialog detected, sending Enter to dismiss');
+        await sendKeys(target, ['Enter']);
+        await sleep(2000);
+        skipDialogCheck = true;
+        continue;
+      }
+    } else {
+      skipDialogCheck = false;
     }
 
     if (readyPattern.test(output)) {

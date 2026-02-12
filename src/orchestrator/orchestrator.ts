@@ -318,7 +318,8 @@ export class Orchestrator {
         try {
           worker = await this.createWorker(tool, task.worktreePath);
         } catch (err) {
-          logger.error(`Failed to create worker for ${tool} (attempt ${attempts}/${this.maxDispatchRetries}): ${err}`);
+          const level = attempts >= this.maxDispatchRetries ? 'error' : 'warn';
+          logger[level](`Failed to create worker for ${tool} (attempt ${attempts}/${this.maxDispatchRetries}): ${err}`);
           continue;
         }
       }
