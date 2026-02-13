@@ -1,0 +1,92 @@
+rules:
+  # Rule 1: .split(' ') piped directly to exec/spawn
+  # Matches: const parts = cmd.split(' '); exec(parts[0], parts.slice(1))
+  # Found in: src/verify/runner.ts:56-57, src/verify/runner.ts:141-144
+  - id: string-split-to-exec
+    patterns:
+      - pattern: |
+          $PARTS = $CMD.split(' ');
+          ...
+          $FUNC($PARTS[0], $PARTS.slice(1), ...);
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^(exec|spawnProcess|spawn|execFile)$
+    message: >
+      Command string split on spaces and passed to exec/spawn. This breaks on
+      arguments containing spaces and can cause unexpected argument injection.
+      Use a proper command parser or pass pre-split arrays.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+      impact: HIGH
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+
+  # Rule 2: Template string interpolation followed by split-to-exec
+  # Matches: cmd.replace('{url}', url).replace('{output}', out); parts = cmd.split(' '); exec(parts[0], ...)
+  # Found in: src/verify/screenshot.ts:32-37
+  - id: template-string-exec
+    patterns:
+      - pattern: |
+          $CMD = $TEMPLATE.replace(...);
+          ...
+          $PARTS = $CMD.split(' ');
+          ...
+          $FUNC($PARTS[0], $PARTS.slice(1), ...);
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^(exec|spawnProcess|spawn|execFile)$
+    message: >
+      User-controlled values interpolated via .replace() into a command string
+      that is then split and executed. A URL or path containing spaces or shell
+      metacharacters can inject extra arguments. Validate inputs or avoid string
+      interpolation for command construction.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+      impact: HIGH
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+
+  # Rule 3: Full environment inheritance to spawned processes
+  # Matches: env: { ...process.env }
+  # Found in: src/agents/subprocess.ts:15
+  - id: full-env-inheritance
+    pattern: "env: { ...process.env }"
+    message: >
+      Passing the full parent environment to a spawned agent process. This may
+      leak sensitive environment variables (API keys, tokens) to subprocesses.
+      Consider allowlisting only the variables the child process needs.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-526: Exposure of Sensitive Information Through Environmental Variables"
+      confidence: MEDIUM
+      impact: MEDIUM
+
+  # Rule 4: Unvalidated file paths passed to agent commands
+  # Matches: args.push('--file', file) in a loop over contextFiles without validation
+  # Found in: src/agents/adapters/claude.ts:28-30
+  - id: unvalidated-file-path
+    patterns:
+      - pattern: |
+          for (const $FILE of $OPTIONS.contextFiles) {
+            $ARGS.push('--file', $FILE);
+          }
+    message: >
+      Context file paths are passed to agent CLI arguments without path
+      validation. An attacker-controlled spec could read arbitrary files via
+      path traversal (e.g. ../../../etc/passwd). Validate that paths are within
+      the expected project directory.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe: "CWE-22: Path Traversal"
+      confidence: MEDIUM
+      impact: MEDIUM
+      references:
+        - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
