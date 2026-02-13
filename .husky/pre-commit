@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Pre-commit hook: scan staged changes for secrets using gitleaks.
+
+GITLEAKS_BIN=".gitleaks-bin/gitleaks"
+
+# If binary missing, try to install it
+if [ ! -x "$GITLEAKS_BIN" ]; then
+  echo "[gitleaks] Binary not found — attempting install..."
+  sh scripts/install-gitleaks.sh 2>&1
+fi
+
+# If still missing, block the commit
+if [ ! -x "$GITLEAKS_BIN" ]; then
+  echo ""
+  echo "ERROR: gitleaks binary not found at $GITLEAKS_BIN"
+  echo ""
+  echo "Install it manually:"
+  echo "  sh scripts/install-gitleaks.sh"
+  echo ""
+  echo "Or skip this check (not recommended):"
+  echo "  git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+# Run gitleaks on staged changes
+"$GITLEAKS_BIN" git --pre-commit --redact --staged --verbose
+
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  echo ""
+  echo "gitleaks detected secrets in staged changes (exit code $STATUS)."
+  echo ""
+  echo "To fix:"
+  echo "  1. Remove the secret from your code"
+  echo "  2. If it's a false positive, add an allowlist entry in .gitleaks.toml"
+  echo "  3. To skip this check once: git commit --no-verify"
+  echo ""
+  exit 1
+fi

@@ -1,0 +1,19 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+
+paths = [
+  '''test/.*''',
+  '''pnpm-lock\.yaml''',
+  '''\.gitleaks\.toml''',
+]
+
+regexTarget = "match"
+regexes = [
+  # Selenium / testing helpers
+  '''sendKeys''',
+  # Example/placeholder AWS key used in docs
+  '''AKIAIOSFODNN7EXAMPLE''',
+]
