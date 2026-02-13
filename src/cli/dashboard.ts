@@ -539,11 +539,17 @@ export async function runDashboard(ctx: AppContext): Promise<void> {
         const task = displayTasks[selectedIdx];
         if (task) await loadLogForTask(task.id);
       }
-      // c: clear completed+failed tasks from this session
+      // c: toggle clear completed+failed tasks from this session
       if (key === 'c') {
-        for (const t of sortedTasks) {
-          if (t.status === 'completed' || t.status === 'failed') {
-            clearedTaskIds.add(t.id);
+        if (clearedTaskIds.size > 0) {
+          // Undo clear: show all tasks again
+          clearedTaskIds.clear();
+        } else {
+          // Clear: hide all currently completed+failed tasks
+          for (const t of sortedTasks) {
+            if (t.status === 'completed' || t.status === 'failed') {
+              clearedTaskIds.add(t.id);
+            }
           }
         }
         updateDisplayTasks();
