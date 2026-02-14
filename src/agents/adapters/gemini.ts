@@ -24,6 +24,15 @@ export class GeminiAdapter implements AgentAdapter {
 
   buildCommand(options: AgentRunOptions): { command: string; args: string[] } {
     const args = ['-p', options.prompt, '--output-format', 'stream-json'];
+
+    // Apply permission flags
+    if (options.permissions) {
+      const p = options.permissions;
+      if (p.shellExec === 'deny' || p.network === 'deny') {
+        args.push('--sandbox');
+      }
+    }
+
     return { command: this.command, args };
   }
 

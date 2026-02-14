@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync } from 'node:fs';
+import { runWithSelfHealing } from './self-heal.js';
 
 function run(command: string, args: string[], env?: Record<string, string>): void {
   const child = spawn(command, args, {
@@ -34,6 +35,9 @@ export function registerTestCommand(program: Command): void {
     .option('--tier <n>', 'run only the specified tier')
     .option('--keep', 'keep test artifacts after run')
     .option('--cleanup', 'kill tmux sessions and remove temp dirs')
+    .option('--self-heal', 'auto-fix failures using an agent and retry')
+    .option('--self-heal-retries <n>', 'max retries for self-heal (default 3)', '3')
+    .option('--self-heal-agent <name>', 'agent for self-heal fixes (default claude)', 'claude')
     .action(async (opts) => {
       if (opts.cleanup) {
         await cleanup();
@@ -49,6 +53,21 @@ export function registerTestCommand(program: Command): void {
 
       if (opts.keep) {
         env['OPENHIVE_KEEP_ARTIFACTS'] = '1';
+      }
+
+      if (opts.selfHeal) {
+        const result = await runWithSelfHealing({
+          command: 'npx',
+          args,
+          agent: opts.selfHealAgent,
+          maxRetries: parseInt(opts.selfHealRetries, 10),
+        });
+        if (!result.success) {
+          console.error(`Self-heal failed after ${result.attempts} attempts`);
+          process.exit(1);
+        }
+        console.log(`Tests passed after ${result.attempts} attempt(s)`);
+        return;
       }
 
       run('npx', args, Object.keys(env).length > 0 ? env : undefined);

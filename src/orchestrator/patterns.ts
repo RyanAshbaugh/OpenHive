@@ -8,6 +8,8 @@
 
 import { TOOL_CONTROLS } from '../agents/tool-control.js';
 import { logger } from '../utils/logger.js';
+import type { ResolvedPermissions } from '../agents/permissions.js';
+import type { ApprovalStrategy } from '../config/schema.js';
 import type {
   StatePattern,
   ActionRule,
@@ -162,25 +164,124 @@ const geminiActivityPatterns: RegExp[] = [
   /generating/i,
 ];
 
+// ─── Approval Categorization Helpers ─────────────────────────────────────────
+
+/** Detect if approval text is for a shell/command execution */
+export function isShellExecApproval(text: string): boolean {
+  return /run.*command|execute|shell|bash|sh -c|subprocess|spawn/i.test(text);
+}
+
+/** Detect if approval text is for a file write operation */
+export function isFileWriteApproval(text: string): boolean {
+  return /write.*file|create.*file|modify|edit|overwrite|save/i.test(text);
+}
+
+/** Detect if approval text is for a network operation */
+export function isNetworkApproval(text: string): boolean {
+  return /network|http|fetch|curl|download|upload|api call|request/i.test(text);
+}
+
+/** Detect if approval text is for a package install */
+export function isPackageInstallApproval(text: string): boolean {
+  return /npm install|pip install|brew install|apt install|package|dependency/i.test(text);
+}
+
+/**
+ * Determine the permission level for an approval prompt based on its content.
+ */
+function getApprovalPermissionLevel(
+  paneOutput: string,
+  permissions: ResolvedPermissions,
+): 'allow' | 'ask' | 'deny' {
+  const tail = lastLines(paneOutput, 20);
+
+  // Check denied commands first (highest priority)
+  if (permissions.deniedCommands.length > 0) {
+    for (const pattern of permissions.deniedCommands) {
+      try {
+        if (new RegExp(pattern).test(tail)) return 'deny';
+      } catch {
+        if (tail.includes(pattern)) return 'deny';
+      }
+    }
+  }
+
+  // Check allowed commands
+  if (permissions.allowedCommands.length > 0) {
+    for (const pattern of permissions.allowedCommands) {
+      try {
+        if (new RegExp(pattern).test(tail)) return 'allow';
+      } catch {
+        if (tail.includes(pattern)) return 'allow';
+      }
+    }
+  }
+
+  // Categorize by operation type and check permission level
+  if (isPackageInstallApproval(tail)) return permissions.packageInstall;
+  if (isShellExecApproval(tail)) return permissions.shellExec;
+  if (isNetworkApproval(tail)) return permissions.network;
+  if (isFileWriteApproval(tail)) return permissions.fileWrite;
+
+  // Default to shellExec for unknown approval types (conservative)
+  return permissions.shellExec;
+}
+
 // ─── Tier 1 Action Rules ────────────────────────────────────────────────────
 
 /**
  * Shared action rules that apply to all tools.
  * Tool-specific rules can override by using higher priority.
+ *
+ * Supports both legacy autoApprove boolean and granular permissions.
  */
-function buildActionRules(autoApprove: boolean): ActionRule[] {
+function buildActionRules(
+  autoApprove: boolean,
+  permissions?: ResolvedPermissions,
+  approvalStrategy?: ApprovalStrategy,
+): ActionRule[] {
   return [
     {
       name: 'auto_approve',
       states: ['waiting_approval'],
-      condition: () => autoApprove,
+      condition: (ctx: ActionContext) => {
+        // Granular permissions path
+        if (permissions && approvalStrategy !== 'cli') {
+          const level = getApprovalPermissionLevel(ctx.snapshot.paneOutput, permissions);
+          return level === 'allow';
+        }
+        // Legacy autoApprove path
+        return autoApprove;
+      },
       action: { type: 'approve' },
+      priority: 10,
+    },
+    {
+      name: 'deny_approval',
+      states: ['waiting_approval'],
+      condition: (ctx: ActionContext) => {
+        if (permissions && approvalStrategy !== 'cli') {
+          const level = getApprovalPermissionLevel(ctx.snapshot.paneOutput, permissions);
+          return level === 'deny';
+        }
+        return false;
+      },
+      action: (ctx: ActionContext) => ({
+        type: 'mark_failed' as const,
+        reason: `Action denied by permission policy. Last output:\n${lastLines(ctx.snapshot.paneOutput, 10)}`,
+      }),
       priority: 10,
     },
     {
       name: 'escalate_approval',
       states: ['waiting_approval'],
-      condition: () => !autoApprove,
+      condition: (ctx: ActionContext) => {
+        if (permissions && approvalStrategy !== 'cli') {
+          const level = getApprovalPermissionLevel(ctx.snapshot.paneOutput, permissions);
+          return level === 'ask';
+        }
+        return !autoApprove;
+      },
       action: (ctx: ActionContext) => ({
         type: 'escalate_llm' as const,
         prompt: `The agent is requesting approval for a tool action. Last output:\n${lastLines(ctx.snapshot.paneOutput, 20)}\n\nTask: ${ctx.assignment?.task.prompt ?? 'unknown'}\n\nShould this be approved? Respond with APPROVE or provide alternative guidance.`,
@@ -276,7 +377,12 @@ function lastLines(text: string, n: number): string {
 
 // ─── Profile Construction ────────────────────────────────────────────────────
 
-export function buildProfile(tool: string, autoApprove = true): ToolOrchestrationProfile {
+export function buildProfile(
+  tool: string,
+  autoApprove = true,
+  permissions?: ResolvedPermissions,
+  approvalStrategy?: ApprovalStrategy,
+): ToolOrchestrationProfile {
   const toolControl = TOOL_CONTROLS[tool];
   if (!toolControl) {
     throw new Error(`No tool control definition for: ${tool}`);
@@ -299,7 +405,7 @@ export function buildProfile(tool: string, autoApprove = true): ToolOrchestratio
   return {
     toolControl,
     statePatterns: profile.statePatterns,
-    actionRules: buildActionRules(autoApprove),
+    actionRules: buildActionRules(autoApprove, permissions, approvalStrategy),
     stuckTimeoutMs: 120_000,
     activityPatterns: profile.activityPatterns,
     completionPattern: toolControl.readyPattern,

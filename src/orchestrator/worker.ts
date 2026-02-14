@@ -27,6 +27,8 @@ import { TOOL_CONTROLS } from '../agents/tool-control.js';
 import { StateDetector } from './state.js';
 import { buildProfile } from './patterns.js';
 import { logger } from '../utils/logger.js';
+import type { ResolvedPermissions } from '../agents/permissions.js';
+import type { ApprovalStrategy } from '../config/schema.js';
 import type {
   WorkerInfo,
   WorkerState,
@@ -44,16 +46,20 @@ export class WorkerSession {
 
   private config: OrchestratorConfig;
   private cwd?: string;
+  private permissions?: ResolvedPermissions;
 
   constructor(
     id: string,
     tool: string,
     config: OrchestratorConfig,
     cwd?: string,
+    permissions?: ResolvedPermissions,
+    approvalStrategy?: ApprovalStrategy,
   ) {
     this.config = config;
     this.cwd = cwd;
-    this.profile = buildProfile(tool, config.autoApprove);
+    this.permissions = permissions;
+    this.profile = buildProfile(tool, config.autoApprove, permissions, approvalStrategy);
     this.stateDetector = new StateDetector(this.profile);
 
     const logsDir = join(process.cwd(), '.openhive', 'logs');
@@ -89,8 +95,11 @@ export class WorkerSession {
     await mkdir(logsDir, { recursive: true });
     await writeFile(this.info.pipeFile, '', 'utf-8');
 
+    // Build permission args for the CLI tool
+    const permArgs = this.buildPermissionArgs();
+
     // Create tmux window with the tool running in it
-    const startCmd = [ctrl.startCommand, ...ctrl.startArgs].join(' ');
+    const startCmd = [ctrl.startCommand, ...ctrl.startArgs, ...permArgs].join(' ');
     logger.info(`Worker ${this.info.id}: creating tmux window (${startCmd})${this.cwd ? ` in ${this.cwd}` : ''}`);
     this.info.tmuxTarget = await createWindow(this.info.id, startCmd, this.cwd);
 
@@ -280,6 +289,50 @@ export class WorkerSession {
    */
   get isIdle(): boolean {
     return this.info.state === 'idle' && !this.info.assignment;
+  }
+
+  /**
+   * Build CLI permission flags for the tool based on resolved permissions.
+   * Returns args that are appended to the start command.
+   */
+  private buildPermissionArgs(): string[] {
+    if (!this.permissions) return [];
+
+    const tool = this.info.tool;
+    const p = this.permissions;
+    const allAllow = p.fileRead === 'allow' && p.fileWrite === 'allow' &&
+      p.shellExec === 'allow' && p.network === 'allow' &&
+      p.packageInstall === 'allow' && p.git === 'allow';
+
+    if (tool === 'claude') {
+      if (allAllow && p.deniedCommands.length === 0) {
+        return ['--dangerously-skip-permissions'];
+      }
+      const allowed: string[] = [];
+      if (p.fileRead === 'allow') allowed.push('Read', 'Glob', 'Grep');
+      if (p.fileWrite === 'allow') allowed.push('Edit', 'Write');
+      if (p.shellExec === 'allow') allowed.push('Bash');
+      if (p.network === 'allow') allowed.push('WebFetch', 'WebSearch');
+      return allowed.flatMap((t) => ['--allowedTools', t]);
+    }
+
+    if (tool === 'codex') {
+      if (allAllow && p.deniedCommands.length === 0) {
+        return ['--approval-mode', 'full-auto'];
+      }
+      if (p.fileWrite === 'allow' && p.shellExec !== 'allow') {
+        return ['--approval-mode', 'auto-edit'];
+      }
+      return ['--approval-mode', 'suggest'];
+    }
+
+    if (tool === 'gemini') {
+      if (p.shellExec === 'deny' || p.network === 'deny') {
+        return ['--sandbox'];
+      }
+    }
+
+    return [];
   }
 
   private updateState(newState: WorkerState): void {

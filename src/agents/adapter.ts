@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { InteractionMode } from '../config/schema.js';
+import type { ResolvedPermissions } from './permissions.js';
 
 export interface AgentCapabilities {
   vision: boolean;
@@ -18,6 +19,8 @@ export interface AgentRunOptions {
   logFile?: string;
   /** When set, stdout is treated as JSONL. Each line is parsed to extract readable text for the log file and stdout accumulator. */
   streamParser?: StreamParser;
+  /** Resolved permissions for this run */
+  permissions?: ResolvedPermissions;
 }
 
 export interface AgentRunResult {

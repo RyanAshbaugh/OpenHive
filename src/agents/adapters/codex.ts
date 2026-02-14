@@ -23,7 +23,25 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   buildCommand(options: AgentRunOptions): { command: string; args: string[] } {
-    const args = ['exec', '--json', options.prompt];
+    const args = ['exec', '--json'];
+
+    // Apply permission flags
+    if (options.permissions) {
+      const p = options.permissions;
+      const allAllow = p.fileRead === 'allow' && p.fileWrite === 'allow' &&
+        p.shellExec === 'allow' && p.network === 'allow' &&
+        p.packageInstall === 'allow' && p.git === 'allow';
+
+      if (allAllow && p.deniedCommands.length === 0) {
+        args.push('--approval-mode', 'full-auto');
+      } else if (p.fileWrite === 'allow' && p.shellExec !== 'allow') {
+        args.push('--approval-mode', 'auto-edit');
+      } else {
+        args.push('--approval-mode', 'suggest');
+      }
+    }
+
+    args.push(options.prompt);
     return { command: this.command, args };
   }
 

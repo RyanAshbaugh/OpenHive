@@ -338,6 +338,19 @@ describe.skipIf(!allAgentsAvailable(avail))('Tier 3: REST API with tests', () =>
           // Create src directory
           await mkdir(join(repo.root, 'src'), { recursive: true });
 
+          // Write vitest config that excludes worktree directories from test discovery
+          await writeFile(
+            join(repo.root, 'vitest.config.js'),
+            [
+              'import { defineConfig } from "vitest/config";',
+              'export default defineConfig({',
+              '  test: {',
+              '    exclude: [".openhive-worktrees/**", "node_modules/**"],',
+              '  },',
+              '});',
+            ].join('\n'),
+          );
+
           // Commit the package setup
           await git(repo.root, 'add', '-A');
           await git(repo.root, 'commit', '-m', 'npm init + express + vitest');

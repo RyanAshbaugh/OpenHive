@@ -1,11 +1,27 @@
 export type InteractionMode = 'pipe' | 'interactive';
 
+export type PermissionLevel = 'allow' | 'ask' | 'deny';
+export type PermissionPreset = 'strict' | 'standard' | 'permissive' | 'full-auto';
+
+export interface AgentPermissions {
+  fileRead?: PermissionLevel;
+  fileWrite?: PermissionLevel;
+  shellExec?: PermissionLevel;
+  network?: PermissionLevel;
+  packageInstall?: PermissionLevel;
+  git?: PermissionLevel;
+  allowedCommands?: string[];
+  deniedCommands?: string[];
+}
+
 export interface AgentConfig {
   enabled: boolean;
   command?: string;
   args?: string[];
   mode?: InteractionMode;
   maxConcurrent?: number;
+  permissionPreset?: PermissionPreset;
+  permissions?: AgentPermissions;
 }
 
 export interface PoolWindowConfig {
@@ -27,6 +43,8 @@ export interface ProviderPoolConfig {
   weeklyLimit?: number;
 }
 
+export type ApprovalStrategy = 'cli' | 'orchestrator' | 'both';
+
 export interface OrchestratorSchemaConfig {
   /** Enable orchestrator mode (default false) */
   enabled?: boolean;
@@ -44,6 +62,10 @@ export interface OrchestratorSchemaConfig {
   llmContextLines?: number;
   /** Max tasks per worker before recycling (default 0 = unlimited) */
   maxTasksPerWorker?: number;
+  /** Default permission preset for all agents (default 'standard') */
+  defaultPermissionPreset?: PermissionPreset;
+  /** How permission enforcement works (default 'both') */
+  approvalStrategy?: ApprovalStrategy;
 }
 
 export interface OpenHiveConfig {
