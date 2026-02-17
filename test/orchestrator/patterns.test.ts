@@ -130,6 +130,15 @@ describe('patterns', () => {
       expect(matchState('Run command? [y/n]')).toBe('waiting_approval');
     });
 
+    it('does not false-positive on agent prose containing approval keywords', () => {
+      // "confirmed" contains "confirm" but word boundary prevents match
+      expect(matchState('I confirmed the workspace')).not.toBe('waiting_approval');
+      // "allowed" contains "allow"
+      expect(matchState('I allowed the file write and it worked')).not.toBe('waiting_approval');
+      // "approved" contains "approve"
+      expect(matchState('I approved of the changes and committed')).not.toBe('waiting_approval');
+    });
+
     it('detects rate_limited', () => {
       expect(matchState('rate limited')).toBe('rate_limited');
     });

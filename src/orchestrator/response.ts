@@ -99,7 +99,7 @@ export class ResponseEngine {
 
     // Make the headless LLM call
     const start = Date.now();
-    const result = await callLlm(tool, context.prompt);
+    const result = await callLlm(tool, context.prompt, this.config?.llmEscalationTimeoutMs);
     const durationMs = Date.now() - start;
 
     // Parse the response
@@ -128,9 +128,9 @@ export class ResponseEngine {
  *
  * Returns the raw text output. Throws on timeout or command failure.
  */
-async function callLlm(tool: string, prompt: string): Promise<string> {
+async function callLlm(tool: string, prompt: string, escalationTimeoutMs?: number): Promise<string> {
   const args = buildLlmArgs(tool, prompt);
-  const timeout = 120_000; // 2 minute timeout for LLM calls
+  const timeout = escalationTimeoutMs ?? 120_000;
 
   logger.debug(`LLM call: ${tool} ${args.slice(0, 2).join(' ')} ... (${prompt.length} chars)`);
 

@@ -87,6 +87,8 @@ async function runPipeline(
         repoRoot: repo.root,
         idleSettlingMs: 3000,
         stuckTimeoutMs: 180_000, // 3 min stuck timeout for real agents
+        taskTimeoutMs: 240_000, // 4 min hard wall-clock deadline per task
+        llmEscalationTimeoutMs: 60_000, // 1 min timeout for LLM escalation calls
       },
       taskStorage,
       onEvent: (e) => {
@@ -194,7 +196,7 @@ async function runPipeline(
 // ─── Tier 1: Simple file creation ────────────────────────────────────────────
 
 describe.skipIf(!allAgentsAvailable(avail))('Tier 1: Simple file creation', () => {
-  it('each agent creates a greeting file, branches merge cleanly', async () => {
+  it('each agent creates a greeting file, branches merge cleanly', { timeout: 600_000 }, async () => {
     await runPipeline(
       [
         {
@@ -225,7 +227,7 @@ describe.skipIf(!allAgentsAvailable(avail))('Tier 1: Simple file creation', () =
 // ─── Tier 2: Simple web page ─────────────────────────────────────────────────
 
 describe.skipIf(!allAgentsAvailable(avail))('Tier 2: Simple web page', () => {
-  it('three agents create HTML/CSS/JS that reference each other', async () => {
+  it('three agents create HTML/CSS/JS that reference each other', { timeout: 600_000 }, async () => {
     await runPipeline(
       [
         {
@@ -278,7 +280,7 @@ describe.skipIf(!allAgentsAvailable(avail))('Tier 2: Simple web page', () => {
 // ─── Tier 3: REST API + tests ────────────────────────────────────────────────
 
 describe.skipIf(!allAgentsAvailable(avail))('Tier 3: REST API with tests', () => {
-  it('three agents build Express app + model + tests, all tests pass', async () => {
+  it('three agents build Express app + model + tests, all tests pass', { timeout: 600_000 }, async () => {
     await runPipeline(
       [
         {

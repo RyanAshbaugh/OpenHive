@@ -39,11 +39,14 @@ export class StateDetector {
     );
 
     // Test the last portion of pane output — the most recent state is at the bottom
-    // Use last 30 lines for state detection (sufficient for all patterns)
-    const recentOutput = lastLines(paneOutput, 30);
+    // Default window is 30 lines; patterns can override via windowSize
+    const defaultWindow = lastLines(paneOutput, 30);
 
     for (const sp of sorted) {
-      if (sp.pattern.test(recentOutput)) {
+      const text = sp.windowSize && sp.windowSize !== 30
+        ? lastLines(paneOutput, sp.windowSize)
+        : defaultWindow;
+      if (sp.pattern.test(text)) {
         return {
           state: sp.state,
           matchedPattern: sp.name,

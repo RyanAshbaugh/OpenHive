@@ -354,6 +354,18 @@ export class Orchestrator {
   private async monitorWorkers(): Promise<void> {
     for (const [id, worker] of this.workers) {
       try {
+        // Wall-clock task timeout: force-fail if exceeded
+        if (
+          this.config.taskTimeoutMs > 0 &&
+          worker.assignment &&
+          Date.now() - worker.assignment.assignedAt > this.config.taskTimeoutMs
+        ) {
+          const reason = `Task exceeded wall-clock timeout of ${this.config.taskTimeoutMs}ms`;
+          logger.warn(`Worker ${id}: ${reason}`);
+          await this.executeAction(worker, { type: 'mark_failed', reason });
+          continue;
+        }
+
         // Check for new output (O(1) stat)
         const hasNew = await worker.hasNewOutput();
         const timeSinceCheck = Date.now() - worker.info.lastCheckAt;

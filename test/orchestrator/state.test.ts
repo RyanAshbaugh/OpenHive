@@ -73,6 +73,26 @@ describe('StateDetector', () => {
       expect(snapshot.state).toBe('idle');
     });
 
+    it('respects per-pattern windowSize for approval detection', () => {
+      // Simulate codex: agent prose with "confirmed" 20+ lines above the idle prompt
+      // Without windowSize, "confirmed" would match waiting_approval (priority 9 > idle 1)
+      // With windowSize: 8, approval patterns only check last 8 lines
+      const codexProfile = buildProfile('codex');
+      const codexDetector = new StateDetector(codexProfile);
+
+      const proseLines = [
+        'I confirmed the workspace and will create the file.',
+        ...Array(15).fill('building out the data store module'),
+        'Created src/model.js with the required functions.',
+        '',
+        '? for shortcuts                                         97% context left',
+      ];
+      const output = proseLines.join('\n');
+      const snapshot = codexDetector.detectFromOutput(output);
+      // Should detect idle, NOT waiting_approval
+      expect(snapshot.state).toBe('idle');
+    });
+
     it('prioritizes higher priority patterns', () => {
       // Both rate_limited (priority 10) and idle (priority 1) could match
       const output = 'rate limit exceeded\n> ';

@@ -1,6 +1,19 @@
 import type { StreamParser } from './adapter.js';
 
 /**
+ * Get the appropriate stream parser for a given agent name.
+ * Returns undefined for agents without a streaming parser.
+ */
+export function getStreamParserForAgent(agentName: string): StreamParser | undefined {
+  switch (agentName) {
+    case 'claude': return claudeStreamParser;
+    case 'codex': return codexStreamParser;
+    case 'gemini': return geminiStreamParser;
+    default: return undefined;
+  }
+}
+
+/**
  * Parse Claude Code `--output-format stream-json` JSONL.
  *
  * Claude stream-json emits one JSON object per line. Key event types:

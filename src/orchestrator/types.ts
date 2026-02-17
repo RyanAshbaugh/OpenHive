@@ -48,6 +48,9 @@ export interface StatePattern {
   state: WorkerState;
   /** Higher priority patterns are checked first (default 0) */
   priority: number;
+  /** Number of trailing lines to check (default 30). Use smaller values for
+   *  prompts that only appear at the very bottom of the screen. */
+  windowSize?: number;
 }
 
 export interface StateSnapshot {
@@ -162,6 +165,10 @@ export interface OrchestratorConfig {
   worktreeDir: string;
   /** Root directory of the git repo for worktree creation (default: process.cwd()) */
   repoRoot?: string;
+  /** Hard wall-clock deadline per task in ms (0 = unlimited, default 0) */
+  taskTimeoutMs: number;
+  /** Timeout for LLM escalation calls in ms (default 60000) */
+  llmEscalationTimeoutMs: number;
 }
 
 export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
@@ -176,6 +183,8 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   maxTasksPerWorker: 0,
   useWorktrees: false,
   worktreeDir: '.openhive-worktrees',
+  taskTimeoutMs: 0,
+  llmEscalationTimeoutMs: 60_000,
 };
 
 // ─── Orchestrator Events ─────────────────────────────────────────────────────

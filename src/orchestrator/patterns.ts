@@ -29,9 +29,10 @@ const claudeStatePatterns: StatePattern[] = [
   },
   {
     name: 'claude:waiting_approval',
-    pattern: /Do you want to|Allow|Approve|tool use|permission|execute.*\?/i,
+    pattern: /Do you want to|\bAllow\b|\bApprove\b|\btool use\b|\bpermission\b|execute.*\?/i,
     state: 'waiting_approval',
     priority: 9,
+    windowSize: 8,
   },
   {
     name: 'claude:waiting_input',
@@ -41,7 +42,7 @@ const claudeStatePatterns: StatePattern[] = [
   },
   {
     name: 'claude:error',
-    pattern: /Error:|error occurred|failed to|ENOENT|EACCES|EPERM/i,
+    pattern: /^\s*(?:Error:|✗|error occurred|ENOENT|EACCES|EPERM)/im,
     state: 'error',
     priority: 7,
   },
@@ -83,9 +84,10 @@ const codexStatePatterns: StatePattern[] = [
   },
   {
     name: 'codex:waiting_approval',
-    pattern: /\[y\/n\]|approve|allow|confirm/i,
+    pattern: /\[y\/n\]|\bapprove\b|\ballow\b|\bconfirm\b/i,
     state: 'waiting_approval',
     priority: 9,
+    windowSize: 8,
   },
   {
     name: 'codex:waiting_input',
@@ -95,7 +97,7 @@ const codexStatePatterns: StatePattern[] = [
   },
   {
     name: 'codex:error',
-    pattern: /Error:|error occurred|failed to/i,
+    pattern: /^\s*(?:Error:|✗|error occurred|codex error)/im,
     state: 'error',
     priority: 7,
   },
@@ -129,9 +131,10 @@ const geminiStatePatterns: StatePattern[] = [
   },
   {
     name: 'gemini:waiting_approval',
-    pattern: /approve|allow|confirm|execute.*\?|tool.*approval/i,
+    pattern: /\bapprove\b|\ballow\b|\bconfirm\b|execute.*\?|tool.*approval/i,
     state: 'waiting_approval',
     priority: 9,
+    windowSize: 8,
   },
   {
     name: 'gemini:waiting_input',
@@ -141,7 +144,7 @@ const geminiStatePatterns: StatePattern[] = [
   },
   {
     name: 'gemini:error',
-    pattern: /Error:|error occurred|failed to/i,
+    pattern: /^\s*(?:Error:|✗|GoogleGenerativeAI Error|An error occurred|Internal error)/im,
     state: 'error',
     priority: 7,
   },

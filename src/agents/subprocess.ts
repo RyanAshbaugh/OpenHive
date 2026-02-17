@@ -9,10 +9,13 @@ export function spawnAgent(
   options: AgentRunOptions,
 ): ChildProcess {
   logger.debug(`Spawning: ${command} ${args.join(' ')} in ${options.cwd}`);
+  // Strip CLAUDECODE env var to allow spawning agents from within a Claude Code session
+  const env = { ...process.env };
+  delete env.CLAUDECODE;
   return spawn(command, args, {
     cwd: options.cwd,
     stdio: 'pipe',
-    env: { ...process.env },
+    env,
   });
 }
 
@@ -20,7 +23,7 @@ export function spawnAgent(
  * Buffers incoming data into complete lines and passes each to a parser.
  * Returns parsed text for both the log file and the stdout accumulator.
  */
-class LineParser {
+export class LineParser {
   private buffer = '';
 
   constructor(private parser: StreamParser) {}
