@@ -76,7 +76,7 @@ describe('StateDetector', () => {
     it('respects per-pattern windowSize for approval detection', () => {
       // Simulate codex: agent prose with "confirmed" 20+ lines above the idle prompt
       // Without windowSize, "confirmed" would match waiting_approval (priority 9 > idle 1)
-      // With windowSize: 8, approval patterns only check last 8 lines
+      // With windowSize: 15, approval patterns only check last 15 lines
       const codexProfile = buildProfile('codex');
       const codexDetector = new StateDetector(codexProfile);
 
@@ -91,6 +91,36 @@ describe('StateDetector', () => {
       const snapshot = codexDetector.detectFromOutput(output);
       // Should detect idle, NOT waiting_approval
       expect(snapshot.state).toBe('idle');
+    });
+
+    it('detects gemini approval dialog within windowSize', () => {
+      // Gemini's approval dialog is tall (box with options + spinner below).
+      // "Allow" keywords appear ~10-12 lines from bottom. windowSize must be
+      // large enough to capture them despite the spinner matching "working".
+      const geminiProfile = buildProfile('gemini');
+      const geminiDetector = new StateDetector(geminiProfile);
+
+      const dialogLines = [
+        '╭───────────────────────────────────╮',
+        '│ Action Required                   │',
+        '│                                   │',
+        '│ ?  Shell find . -maxdepth 3       │',
+        '│                                   │',
+        '│ find . -maxdepth 3                │',
+        '│ Allow execution of: \'find\'?       │',
+        '│                                   │',
+        '│ ● 1. Allow once                   │',
+        '│   2. Allow for this session       │',
+        '│   3. No, suggest changes (esc)    │',
+        '│                                   │',
+        '╰───────────────────────────────────╯',
+        '',
+        '⠏ Waiting for user confirmation...',
+      ];
+      const output = dialogLines.join('\n');
+      const snapshot = geminiDetector.detectFromOutput(output);
+      // Should detect waiting_approval (priority 9), NOT working from spinner (priority 5)
+      expect(snapshot.state).toBe('waiting_approval');
     });
 
     it('prioritizes higher priority patterns', () => {

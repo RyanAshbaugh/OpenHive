@@ -32,7 +32,7 @@ const claudeStatePatterns: StatePattern[] = [
     pattern: /Do you want to|\bAllow\b|\bApprove\b|\btool use\b|\bpermission\b|execute.*\?/i,
     state: 'waiting_approval',
     priority: 9,
-    windowSize: 8,
+    windowSize: 15,
   },
   {
     name: 'claude:waiting_input',
@@ -87,7 +87,7 @@ const codexStatePatterns: StatePattern[] = [
     pattern: /\[y\/n\]|\bapprove\b|\ballow\b|\bconfirm\b/i,
     state: 'waiting_approval',
     priority: 9,
-    windowSize: 8,
+    windowSize: 15,
   },
   {
     name: 'codex:waiting_input',
@@ -134,7 +134,7 @@ const geminiStatePatterns: StatePattern[] = [
     pattern: /\bapprove\b|\ballow\b|\bconfirm\b|execute.*\?|tool.*approval/i,
     state: 'waiting_approval',
     priority: 9,
-    windowSize: 8,
+    windowSize: 15,
   },
   {
     name: 'gemini:waiting_input',
