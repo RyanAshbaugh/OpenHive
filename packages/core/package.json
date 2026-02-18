@@ -1,0 +1,48 @@
+{
+  "name": "@openhive/core",
+  "version": "0.1.0",
+  "description": "CLI-first multi-agent orchestrator for AI coding agents",
+  "type": "module",
+  "bin": {
+    "openhive": "./bin/openhive.mjs"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:tier1": "vitest run --config vitest.e2e.config.ts -t 'Tier 1'",
+    "test:e2e:tier2": "vitest run --config vitest.e2e.config.ts -t 'Tier 2'",
+    "test:e2e:tier3": "vitest run --config vitest.e2e.config.ts -t 'Tier 3'",
+    "test:e2e:keep": "OPENHIVE_KEEP_ARTIFACTS=1 vitest run --config vitest.e2e.config.ts",
+    "test:e2e:cleanup": "tmux kill-session -t openhive-orch 2>/dev/null; rm -rf \"${TMPDIR:-/tmp}\"/openhive-e2e-* 2>/dev/null; echo 'Cleaned up (tmux + temp dirs)'",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestrator",
+    "cli",
+    "multi-agent"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "json5": "^2.2.3",
+    "nanoid": "^5.0.9",
+    "ora": "^8.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

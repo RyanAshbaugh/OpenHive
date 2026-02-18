@@ -1,0 +1,28 @@
+{
+  "name": "@openhive/mobile",
+  "version": "0.1.0",
+  "description": "Mobile simulator automation tools for OpenHive",
+  "type": "module",
+  "bin": {
+    "openhive-mobile": "./bin/openhive-mobile"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "echo 'No tests yet'",
+    "lint": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "json5": "^2.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

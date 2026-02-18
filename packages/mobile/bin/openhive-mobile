@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================================
+# openhive-mobile — CLI entry point for @openhive/mobile
+# ============================================================================
+#
+# Usage:
+#   openhive-mobile <command> [options]
+#
+# Commands:
+#   run              Build, launch, and authenticate (full flow)
+#   run --skip-build Use cached build
+#   run --skip-auth  Skip authentication
+#   auth             Authenticate on running simulator
+#   creds            Set up keychain credentials
+#   creds --verify   Verify stored credentials
+#   creds --delete   Delete stored credentials
+#   help             Show this help
+#
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS_DIR="$BIN_DIR/../scripts"
+
+CMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+  run)
+    exec "$SCRIPTS_DIR/build-and-run.sh" "$@"
+    ;;
+  auth)
+    exec "$SCRIPTS_DIR/authenticate-sim.sh" "$@"
+    ;;
+  creds|credentials)
+    exec "$SCRIPTS_DIR/setup-credentials.sh" "$@"
+    ;;
+  help|--help|-h)
+    echo "openhive-mobile — Mobile simulator automation tools"
+    echo ""
+    echo "Usage: openhive-mobile <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  run              Build, launch, and authenticate (full flow)"
+    echo "  run --skip-build Use cached Xcode build"
+    echo "  run --skip-auth  Skip authentication step"
+    echo "  auth             Authenticate on running simulator"
+    echo "  creds            Set up keychain credentials interactively"
+    echo "  creds --verify   Verify stored credentials against API"
+    echo "  creds --delete   Delete stored credentials"
+    echo "  help             Show this help"
+    echo ""
+    echo "Configuration:"
+    echo "  Place a mobile.json5 file at .openhive/mobile.json5 in your project root."
+    echo "  Override with \$OPENHIVE_MOBILE_CONFIG env var."
+    echo "  Override project root with \$PROJECT_DIR env var."
+    ;;
+  *)
+    echo "Unknown command: $CMD"
+    echo "Run 'openhive-mobile help' for usage."
+    exit 1
+    ;;
+esac

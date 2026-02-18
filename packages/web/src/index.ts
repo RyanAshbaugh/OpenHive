@@ -1,0 +1,2 @@
+// @openhive/web — placeholder
+export {};
