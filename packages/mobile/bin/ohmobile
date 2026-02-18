@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ============================================================================
-# openhive-mobile — CLI entry point for @openhive/mobile
+# ohmobile — CLI entry point for @openhive/mobile
 # ============================================================================
 #
 # Usage:
-#   openhive-mobile <command> [options]
+#   ohmobile <command> [options]
 #
 # Commands:
 #   run              Build, launch, and authenticate (full flow)
@@ -16,6 +16,8 @@ set -euo pipefail
 #   creds            Set up keychain credentials
 #   creds --verify   Verify stored credentials
 #   creds --delete   Delete stored credentials
+#   simulate <scene> Trigger a simulation scene via deep link
+#   record <scene>   Record a simulation (stub — not yet implemented)
 #   help             Show this help
 #
 
@@ -32,6 +34,12 @@ SCRIPTS_DIR="$BIN_DIR/../scripts"
 CMD="${1:-help}"
 shift 2>/dev/null || true
 
+# Load config for commands that need it
+_load_config() {
+  export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+  source "$SCRIPTS_DIR/_load-config.sh"
+}
+
 case "$CMD" in
   run)
     exec "$SCRIPTS_DIR/build-and-run.sh" "$@"
@@ -42,10 +50,44 @@ case "$CMD" in
   creds|credentials)
     exec "$SCRIPTS_DIR/setup-credentials.sh" "$@"
     ;;
+  simulate)
+    _load_config
+    SCENE="${1:-}"
+    if [ -z "$SCENE" ] || [ "$SCENE" = "--list" ]; then
+      echo "Usage: ohmobile simulate <scene>"
+      echo ""
+      echo "Sends a deep link to the running simulator to trigger a simulation scene."
+      echo "The app must be running and authenticated first."
+      echo ""
+      echo "Example:"
+      echo "  ohmobile simulate heatmap-timelapse"
+      exit 0
+    fi
+    shift
+    SPEED="${1:-}"
+    QUERY="scene=$SCENE"
+    [ -n "$SPEED" ] && QUERY="$QUERY&speed=$SPEED"
+    echo "Triggering simulation: $SCENE"
+    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?$QUERY"
+    ;;
+  record)
+    _load_config
+    SCENE="${1:-}"
+    if [ -z "$SCENE" ]; then
+      echo "Usage: ohmobile record <scene>"
+      echo ""
+      echo "Starts screen recording, triggers simulation, waits for completion, stops recording."
+      echo "(Not yet implemented — use 'simulate' for now.)"
+      exit 0
+    fi
+    echo "Record command is not yet implemented."
+    echo "Use 'ohmobile simulate $SCENE' to trigger the simulation manually."
+    exit 1
+    ;;
   help|--help|-h)
-    echo "openhive-mobile — Mobile simulator automation tools"
+    echo "ohmobile — Mobile simulator automation tools"
     echo ""
-    echo "Usage: openhive-mobile <command> [options]"
+    echo "Usage: ohmobile <command> [options]"
     echo ""
     echo "Commands:"
     echo "  run              Build, launch, and authenticate (full flow)"
@@ -55,6 +97,8 @@ case "$CMD" in
     echo "  creds            Set up keychain credentials interactively"
     echo "  creds --verify   Verify stored credentials against API"
     echo "  creds --delete   Delete stored credentials"
+    echo "  simulate <scene> Trigger a simulation scene via deep link"
+    echo "  record <scene>   Record a simulation (not yet implemented)"
     echo "  help             Show this help"
     echo ""
     echo "Configuration:"
@@ -64,7 +108,7 @@ case "$CMD" in
     ;;
   *)
     echo "Unknown command: $CMD"
-    echo "Run 'openhive-mobile help' for usage."
+    echo "Run 'ohmobile help' for usage."
     exit 1
     ;;
 esac

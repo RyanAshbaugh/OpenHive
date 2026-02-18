@@ -28,4 +28,5 @@ export const defaults: MobileConfig = {
     urlEnvVar: 'SUPABASE_URL',
     keyEnvVar: 'SUPABASE_ANON_KEY',
   },
+  hooks: {},
 };

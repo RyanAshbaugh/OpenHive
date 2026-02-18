@@ -11,7 +11,9 @@
 #   BUNDLE_ID, DEEP_LINK_SCHEME, EXPO_DEV_CLIENT_SCHEME, METRO_PORT, APP_NAME,
 #   SIM_NAME, SIM_RUNTIME,
 #   XCODE_WORKSPACE, XCODE_SCHEME, XCODE_CONFIGURATION,
-#   AUTH_PROVIDER, KEYCHAIN_SERVICE, AUTH_ENV_FILE, AUTH_URL_ENV_VAR, AUTH_KEY_ENV_VAR
+#   AUTH_PROVIDER, KEYCHAIN_SERVICE, AUTH_ENV_FILE, AUTH_URL_ENV_VAR, AUTH_KEY_ENV_VAR,
+#   HOOK_POST_BUILD, HOOK_POST_BOOT, HOOK_POST_INSTALL,
+#   HOOK_POST_LAUNCH, HOOK_POST_AUTH, HOOK_POST_SETUP
 
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 _CONFIG_FILE="${PROJECT_DIR}/${OPENHIVE_MOBILE_CONFIG:-.openhive/mobile.json5}"
@@ -53,6 +55,7 @@ defaults = {
         "urlEnvVar": "SUPABASE_URL",
         "keyEnvVar": "SUPABASE_ANON_KEY",
     },
+    "hooks": {},
 }
 
 def deep_merge(base, override):
@@ -68,9 +71,10 @@ cfg = dict(defaults)
 if os.path.isfile(config_path):
     with open(config_path) as f:
         raw = f.read()
-    # Minimal JSON5 → JSON: strip // comments and trailing commas
+    # Minimal JSON5 → JSON: strip // comments, trailing commas, quote bare keys
     raw = re.sub(r'//.*', '', raw)
     raw = re.sub(r',\s*([}\]])', r'\1', raw)
+    raw = re.sub(r'(?m)^(\s*)([a-zA-Z_]\w*)\s*:', r'\1"\2":', raw)
     try:
         file_cfg = json.loads(raw)
         cfg = deep_merge(defaults, file_cfg)
@@ -102,5 +106,13 @@ sh_export("KEYCHAIN_SERVICE", au["keychainService"])
 sh_export("AUTH_ENV_FILE", au["envFile"])
 sh_export("AUTH_URL_ENV_VAR", au["urlEnvVar"])
 sh_export("AUTH_KEY_ENV_VAR", au["keyEnvVar"])
+
+h = cfg.get("hooks", {})
+sh_export("HOOK_POST_BUILD", h.get("postBuild", ""))
+sh_export("HOOK_POST_BOOT", h.get("postBoot", ""))
+sh_export("HOOK_POST_INSTALL", h.get("postInstall", ""))
+sh_export("HOOK_POST_LAUNCH", h.get("postLaunch", ""))
+sh_export("HOOK_POST_AUTH", h.get("postAuth", ""))
+sh_export("HOOK_POST_SETUP", h.get("postSetup", ""))
 PYEOF
 )"

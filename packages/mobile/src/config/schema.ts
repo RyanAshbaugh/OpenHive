@@ -52,4 +52,25 @@ export interface MobileConfig {
     /** Env var name for the API key / anon key */
     keyEnvVar: string;
   };
+
+  /**
+   * Lifecycle hooks — scripts sourced at specific points during build/run.
+   * Each value is a script path relative to $PROJECT_DIR.
+   * Scripts are `source`d (not exec'd) so they have access to all env vars
+   * and helper functions (tap_button, screenshot, etc.).
+   */
+  hooks?: {
+    /** After xcodebuild completes */
+    postBuild?: string;
+    /** After simulator boots */
+    postBoot?: string;
+    /** After app is installed */
+    postInstall?: string;
+    /** After app launches + dialogs dismissed */
+    postLaunch?: string;
+    /** After authentication completes */
+    postAuth?: string;
+    /** After the entire setup flow finishes */
+    postSetup?: string;
+  };
 }

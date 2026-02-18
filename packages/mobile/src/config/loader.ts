@@ -11,9 +11,9 @@ const DEFAULT_PATH = '.openhive/mobile.json5';
  * Deep-merge `source` into `target`, returning a new object.
  * Only plain objects are recursed — arrays and primitives are overwritten.
  */
-function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
-  const result = { ...target } as Record<string, unknown>;
-  for (const key of Object.keys(source) as Array<keyof T>) {
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
     const sv = source[key];
     const tv = target[key];
     if (
@@ -24,15 +24,15 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
       typeof tv === 'object' &&
       !Array.isArray(tv)
     ) {
-      result[key as string] = deepMerge(
+      result[key] = deepMerge(
         tv as Record<string, unknown>,
         sv as Record<string, unknown>,
       );
     } else if (sv !== undefined) {
-      result[key as string] = sv;
+      result[key] = sv;
     }
   }
-  return result as T;
+  return result;
 }
 
 /**
@@ -57,5 +57,8 @@ export function loadConfig(projectDir?: string): MobileConfig {
     // Missing config file is fine — defaults are used.
   }
 
-  return deepMerge(defaults, fileConfig);
+  return deepMerge(
+    defaults as unknown as Record<string, unknown>,
+    fileConfig as unknown as Record<string, unknown>,
+  ) as unknown as MobileConfig;
 }

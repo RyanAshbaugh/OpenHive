@@ -20,6 +20,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/sim-helpers.sh"
 
+# Run a lifecycle hook if configured. Script is sourced (not exec'd) so it
+# has access to all env vars and helper functions (tap_button, screenshot, etc.).
+run_hook() {
+  local hook_path="$1"
+  [ -z "$hook_path" ] && return 0
+  local full_path="$PROJECT_DIR/$hook_path"
+  if [ -f "$full_path" ]; then
+    echo "  Running hook: $hook_path"
+    source "$full_path"
+  else
+    echo "  WARNING: Hook not found: $full_path" >&2
+  fi
+}
+
 SKIP_BUILD=false
 SKIP_AUTH=false
 for arg in "$@"; do
@@ -58,6 +72,7 @@ else
   fi
 fi
 echo "  App: $APP_PATH"
+run_hook "$HOOK_POST_BUILD"
 
 # --- Step 2: Boot simulator ---
 echo "[2/7] Booting simulator..."
@@ -71,10 +86,12 @@ if [ -z "$SIM_UDID" ]; then
   exit 1
 fi
 echo "  UDID: $SIM_UDID"
+run_hook "$HOOK_POST_BOOT"
 
 # --- Step 3: Install ---
 echo "[3/7] Installing app..."
 xcrun simctl install "$SIM_NAME" "$APP_PATH"
+run_hook "$HOOK_POST_INSTALL"
 
 # --- Step 4: Start Metro ---
 echo "[4/7] Starting Metro bundler..."
@@ -132,6 +149,7 @@ sleep 2
 # Screenshot to verify state
 SCREEN=$(screenshot "step6-after-dialogs")
 echo "  Screenshot: $SCREEN"
+run_hook "$HOOK_POST_LAUNCH"
 
 # --- Step 7: Authenticate ---
 if [ "$SKIP_AUTH" = true ]; then
@@ -147,9 +165,11 @@ else
 
   SCREEN=$(screenshot "step7-authenticated")
   echo "  Screenshot: $SCREEN"
+  run_hook "$HOOK_POST_AUTH"
 fi
 
 # --- Done ---
+run_hook "$HOOK_POST_SETUP"
 echo ""
 echo "==========================================="
 echo "  $APP_NAME is running on $SIM_NAME"
