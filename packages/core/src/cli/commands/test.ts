@@ -2,13 +2,18 @@ import type { Command } from 'commander';
 import { spawn, execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readdirSync } from 'node:fs';
 import { runWithSelfHealing } from './self-heal.js';
+
+/** packages/core/ directory — vitest configs live here */
+const CORE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 function run(command: string, args: string[], env?: Record<string, string>): void {
   const child = spawn(command, args, {
     stdio: 'inherit',
+    cwd: CORE_DIR,
     env: env ? { ...process.env, ...env } : undefined,
   });
   child.on('close', (code) => {
@@ -59,6 +64,7 @@ export function registerTestCommand(program: Command): void {
         const result = await runWithSelfHealing({
           command: 'npx',
           args,
+          cwd: CORE_DIR,
           agent: opts.selfHealAgent,
           maxRetries: parseInt(opts.selfHealRetries, 10),
         });
