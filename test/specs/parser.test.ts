@@ -122,6 +122,16 @@ describe('validateSpec', () => {
     })).toThrow('serve.port');
   });
 
+  it('should accept serve config without port', () => {
+    const result = validateSpec({
+      name: 'x', goal: 'y',
+      tasks: [{ id: 'a', name: 'A', prompt: 'p' }],
+      serve: { command: 'node server.js' },
+    });
+    expect(result.serve?.command).toBe('node server.js');
+    expect(result.serve?.port).toBeUndefined();
+  });
+
   it('should validate screenshot entries', () => {
     expect(() => validateSpec({
       name: 'x', goal: 'y',

@@ -19,8 +19,8 @@ export interface VerifyConfig {
 export interface ServeConfig {
   /** Command to start the dev server */
   command: string;
-  /** Port the server listens on */
-  port: number;
+  /** Port the server listens on (optional — use findFreePort() if omitted) */
+  port?: number;
   /** Stdout pattern that indicates the server is ready */
   readyPattern?: string;
   /** Max time to wait for server startup in ms */

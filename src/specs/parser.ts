@@ -105,7 +105,7 @@ export function validateSpec(data: unknown): ProjectSpec {
     if (typeof serve.command !== 'string' || !serve.command) {
       throw new SpecParseError('serve.command must be a non-empty string');
     }
-    if (typeof serve.port !== 'number' || serve.port <= 0) {
+    if (serve.port !== undefined && (typeof serve.port !== 'number' || serve.port <= 0)) {
       throw new SpecParseError('serve.port must be a positive number');
     }
   }

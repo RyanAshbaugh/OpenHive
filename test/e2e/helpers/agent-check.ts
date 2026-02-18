@@ -46,6 +46,19 @@ export function allAgentsAvailable(avail: AgentAvailability): boolean {
 }
 
 /**
+ * Check if Playwright is available for screenshot capture.
+ * Runs `npx playwright screenshot --help` to verify.
+ */
+export async function checkPlaywrightAvailable(): Promise<boolean> {
+  try {
+    await execFileAsync('npx', ['playwright', 'screenshot', '--help'], { timeout: 30_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns a human-readable summary of what's missing.
  */
 export function unavailableSummary(avail: AgentAvailability): string {
