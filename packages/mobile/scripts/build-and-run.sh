@@ -94,15 +94,16 @@ xcrun simctl install "$SIM_NAME" "$APP_PATH"
 run_hook "$HOOK_POST_INSTALL"
 
 # --- Step 4: Start Metro ---
-echo "[4/7] Starting Metro bundler..."
+METRO_SESSION="ohmobile-metro"
+echo "[4/7] Starting Metro bundler (tmux: $METRO_SESSION)..."
 lsof -ti:$METRO_PORT | xargs kill -9 2>/dev/null || true
+tmux kill-session -t "$METRO_SESSION" 2>/dev/null || true
 sleep 1
 
-cd "$PROJECT_DIR"
-npx expo start --port $METRO_PORT 2>&1 &
-METRO_PID=$!
+tmux new-session -d -s "$METRO_SESSION" -c "$PROJECT_DIR" \
+  "npx expo start --port $METRO_PORT 2>&1; echo '[Metro exited]'; read"
 
-echo "  Waiting for Metro (PID: $METRO_PID)..."
+echo "  Waiting for Metro..."
 for i in $(seq 1 30); do
   if curl -s "http://localhost:$METRO_PORT/status" 2>/dev/null | grep -q "running"; then
     echo "  Metro ready"
@@ -173,12 +174,10 @@ run_hook "$HOOK_POST_SETUP"
 echo ""
 echo "==========================================="
 echo "  $APP_NAME is running on $SIM_NAME"
-echo "  Metro PID: $METRO_PID"
+echo "  Metro: tmux attach -t $METRO_SESSION"
 echo "==========================================="
 echo ""
 echo "Useful commands:"
-echo "  Screenshot:  source $SCRIPTS_DIR/sim-helpers.sh && screenshot 'name'"
-echo "  UI elements: source $SCRIPTS_DIR/sim-helpers.sh && list_ui_elements"
-echo "  Tap button:  source $SCRIPTS_DIR/sim-helpers.sh && tap_button 'Label'"
-echo "  Stop Metro:  kill $METRO_PID"
+echo "  Metro logs:  tmux attach -t $METRO_SESSION"
+echo "  Stop Metro:  tmux kill-session -t $METRO_SESSION"
 echo "  Stop sim:    xcrun simctl shutdown '$SIM_NAME'"

@@ -25,7 +25,7 @@ if [ "${1:-}" = "--delete" ]; then
 fi
 
 if [ "${1:-}" = "--verify" ]; then
-  PYSCRIPT_V=$(mktemp /tmp/verify-creds-XXXXXX.py)
+  PYSCRIPT_V=$(mktemp /tmp/verify-creds-XXXXXX)
   trap "rm -f $PYSCRIPT_V" EXIT
   cat > "$PYSCRIPT_V" <<PYEOF_HEADER
 PROJECT_DIR = "$PROJECT_DIR"
@@ -92,7 +92,7 @@ PYEOF
 fi
 
 # --- Interactive credential setup via Python (bypasses all shell interpretation) ---
-PYSCRIPT=$(mktemp /tmp/setup-creds-XXXXXX.py)
+PYSCRIPT=$(mktemp /tmp/setup-creds-XXXXXX)
 trap "rm -f $PYSCRIPT" EXIT
 
 cat > "$PYSCRIPT" <<PYEOF_HEADER
