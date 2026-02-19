@@ -74,15 +74,73 @@ case "$CMD" in
     _load_config
     SCENE="${1:-}"
     if [ -z "$SCENE" ]; then
-      echo "Usage: ohmobile record <scene>"
+      echo "Usage: ohmobile record <scene> [--duration <seconds>]"
       echo ""
-      echo "Starts screen recording, triggers simulation, waits for completion, stops recording."
-      echo "(Not yet implemented — use 'simulate' for now.)"
+      echo "Starts screen recording, triggers simulation, waits, stops recording."
+      echo "The app must be running and authenticated first."
+      echo ""
+      echo "Options:"
+      echo "  --duration <sec>  Recording duration (default: 35)"
+      echo ""
+      echo "Example:"
+      echo "  ohmobile record heatmap-timelapse"
+      echo "  ohmobile record heatmap-timelapse --duration 45"
       exit 0
     fi
-    echo "Record command is not yet implemented."
-    echo "Use 'ohmobile simulate $SCENE' to trigger the simulation manually."
-    exit 1
+    shift
+
+    DURATION=35
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --duration) DURATION="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    RECORDINGS_DIR="$PROJECT_DIR/.openhive/recordings"
+    mkdir -p "$RECORDINGS_DIR"
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    OUTPUT="$RECORDINGS_DIR/${SCENE}-${TIMESTAMP}.mov"
+
+    echo "=== Recording: $SCENE ==="
+    echo "  Output:   $OUTPUT"
+    echo "  Duration: ${DURATION}s"
+    echo ""
+
+    # Start recording in background
+    xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
+    RECORD_PID=$!
+    sleep 2
+
+    # Trigger simulation
+    echo "  Triggering simulation..."
+    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE"
+
+    # Wait for simulation + buffer
+    echo "  Recording for ${DURATION}s... (Ctrl+C to stop early)"
+    trap "kill -INT $RECORD_PID 2>/dev/null; wait $RECORD_PID 2>/dev/null; echo ''; echo 'Recording saved: $OUTPUT'; exit 0" INT
+    sleep "$DURATION"
+
+    # Stop recording (SIGINT for clean .mov finalization)
+    kill -INT "$RECORD_PID" 2>/dev/null
+    wait "$RECORD_PID" 2>/dev/null
+
+    echo ""
+    echo "Recording saved: $OUTPUT"
+
+    # Auto-clean status bar
+    if [ -f "$OUTPUT" ]; then
+      echo "  Cleaning status bar..."
+      CLEAN_ARGS=(--device "$SIM_NAME")
+      [ -n "${NO_CLEAN:-}" ] && CLEAN_ARGS=()
+      if [ ${#CLEAN_ARGS[@]} -gt 0 ]; then
+        "$SCRIPTS_DIR/clean-video.sh" "$OUTPUT" "${CLEAN_ARGS[@]}"
+      fi
+    fi
+    ;;
+  clean)
+    _load_config
+    exec "$SCRIPTS_DIR/clean-video.sh" --device "$SIM_NAME" "$@"
     ;;
   help|--help|-h)
     echo "ohmobile — Mobile simulator automation tools"
@@ -98,7 +156,8 @@ case "$CMD" in
     echo "  creds --verify   Verify stored credentials against API"
     echo "  creds --delete   Delete stored credentials"
     echo "  simulate <scene> Trigger a simulation scene via deep link"
-    echo "  record <scene>   Record a simulation (not yet implemented)"
+    echo "  record <scene>   Record screen during a simulation scene"
+    echo "  clean <file>     Remove status bar from a video or screenshot"
     echo "  help             Show this help"
     echo ""
     echo "Configuration:"
