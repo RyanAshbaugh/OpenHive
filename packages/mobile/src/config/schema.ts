@@ -53,6 +53,12 @@ export interface MobileConfig {
     keyEnvVar: string;
   };
 
+  /** AI agent settings for code generation */
+  agent?: {
+    /** CLI command to invoke (default: "claude") */
+    cli: string;
+  };
+
   /**
    * Lifecycle hooks — scripts sourced at specific points during build/run.
    * Each value is a script path relative to $PROJECT_DIR.

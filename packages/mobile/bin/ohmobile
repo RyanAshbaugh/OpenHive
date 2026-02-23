@@ -21,6 +21,7 @@ set -euo pipefail
 #   scenes           List available simulation scenes
 #   simulate <scene> Trigger a simulation scene via deep link
 #   record <scene>   Record a simulation (stub — not yet implemented)
+#   generate-scene   Generate a scene JS file using an AI agent
 #   help             Show this help
 #
 
@@ -188,6 +189,10 @@ case "$CMD" in
       fi
     fi
     ;;
+  generate-scene)
+    _load_config
+    exec "$SCRIPTS_DIR/generate-scene.sh" "$@"
+    ;;
   stop)
     _load_config
     exec "$SCRIPTS_DIR/stop.sh" "$@"
@@ -214,6 +219,7 @@ case "$CMD" in
     echo "  scenes           List available simulation scenes"
     echo "  simulate <scene> Trigger a simulation scene via deep link"
     echo "  record <scene>   Record screen during a simulation scene"
+    echo "  generate-scene   Generate a scene JS file using an AI agent"
     echo "  clean <file>     Remove status bar from a video or screenshot"
     echo "  help             Show this help"
     echo ""

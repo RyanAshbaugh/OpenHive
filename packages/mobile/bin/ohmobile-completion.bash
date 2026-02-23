@@ -12,7 +12,7 @@ _ohmobile_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="run auth creds stop scenes simulate record clean help"
+  commands="run auth creds stop scenes simulate record generate-scene clean help"
 
   # Complete subcommands
   if [ "$COMP_CWORD" -eq 1 ]; then
@@ -22,7 +22,7 @@ _ohmobile_completions() {
 
   # Complete scene names for simulate/record
   case "$prev" in
-    simulate|record)
+    simulate|record|generate-scene)
       local scenes_dir=""
       local project_dir="${PROJECT_DIR:-$(pwd)}"
       for candidate in \
