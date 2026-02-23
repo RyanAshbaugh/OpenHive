@@ -7,7 +7,9 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { stat, open } from 'node:fs/promises';
+import { stat, open, writeFile as writeFileAsync, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -106,6 +108,11 @@ export async function createWindow(windowName: string, command: string, cwd?: st
   }
   args.push(command);
   await tmux(...args);
+
+  // Keep window alive after the command exits so the orchestrator can detect
+  // the final state (idle/completed) before the window disappears.
+  await tmux('set-option', '-t', target, 'remain-on-exit', 'on');
+
   return target;
 }
 
@@ -144,11 +151,25 @@ export async function sendKeys(target: string, keys: string[]): Promise<void> {
 
 /**
  * Type text followed by Enter. For sending prompts/responses to agents.
+ *
+ * For multi-line text, uses tmux's paste buffer to avoid newlines being
+ * interpreted as Enter keypresses (which would submit partial input).
  */
 export async function sendText(target: string, text: string): Promise<void> {
-  // Use literal flag to avoid interpreting special chars
-  await tmux('send-keys', '-t', target, '-l', text);
-  // Brief delay to let TUI process the typed text before Enter
+  if (text.includes('\n')) {
+    // Write to a temp file, load into tmux buffer, paste into pane
+    const tmpFile = join(tmpdir(), `openhive-prompt-${Date.now()}.txt`);
+    await writeFileAsync(tmpFile, text, 'utf-8');
+    try {
+      await tmux('load-buffer', '-b', 'openhive-prompt', tmpFile);
+      await tmux('paste-buffer', '-b', 'openhive-prompt', '-t', target, '-d');
+    } finally {
+      await unlink(tmpFile).catch(() => {});
+    }
+  } else {
+    await tmux('send-keys', '-t', target, '-l', text);
+  }
+  // Brief delay to let TUI process the pasted text before Enter
   await sleep(500);
   await tmux('send-keys', '-t', target, 'Enter');
 }

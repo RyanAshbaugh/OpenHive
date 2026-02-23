@@ -342,9 +342,14 @@ function buildActionRules(
       condition: (ctx: ActionContext) => {
         // Only mark complete if:
         // 1. Worker has an assigned task
-        // 2. The idle state has settled (5s delay to prevent false positives)
+        // 2. Worker has been in a non-idle state at least once (actually started working)
+        // 3. The idle state has settled (5s delay to prevent false positives)
         if (!ctx.assignment) {
           logger.debug('mark_complete_idle: no assignment');
+          return false;
+        }
+        if (!ctx.assignment.hasWorked) {
+          logger.debug('mark_complete_idle: agent has not started working yet');
           return false;
         }
         if (!ctx.assignment.idleDetectedAt) {

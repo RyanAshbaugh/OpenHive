@@ -15,6 +15,8 @@ import { registerDevCommands } from './commands/dev.js';
 import { registerTestCommand } from './commands/test.js';
 import { registerDoCommand } from './commands/do.js';
 import { registerChatCommand } from './commands/chat.js';
+import { registerFixCommand } from './commands/fix.js';
+import { registerCleanCommand } from './commands/clean.js';
 
 function createProgram(): Command {
   const program = new Command();
@@ -46,6 +48,8 @@ function createProgram(): Command {
   registerTestCommand(program);
   registerDoCommand(program);
   registerChatCommand(program);
+  registerFixCommand(program);
+  registerCleanCommand(program);
 
   return program;
 }

@@ -109,6 +109,8 @@ export interface TaskAssignment {
   assignedAt: number;
   /** Timestamp when idle state was first detected after sending prompt */
   idleDetectedAt?: number;
+  /** True once the worker has entered a non-idle state (working, waiting_approval, etc.) since assignment */
+  hasWorked?: boolean;
 }
 
 // ─── Worker Info ─────────────────────────────────────────────────────────────

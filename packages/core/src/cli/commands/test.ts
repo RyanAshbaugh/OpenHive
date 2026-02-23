@@ -35,6 +35,28 @@ export function registerTestCommand(program: Command): void {
     });
 
   test
+    .command('self-heal')
+    .description('Run self-heal capability tests (requires claude)')
+    .option('--scenario <n>', 'run only the specified scenario (1, 2, or 3)')
+    .option('--keep', 'keep test artifacts after run')
+    .action((opts) => {
+      const args = ['vitest', 'run', '--config', 'vitest.e2e.config.ts'];
+      const env: Record<string, string> = {};
+
+      if (opts.scenario) {
+        args.push('-t', `Scenario ${opts.scenario}`);
+      } else {
+        args.push('-t', 'Self-heal');
+      }
+
+      if (opts.keep) {
+        env['OPENHIVE_KEEP_ARTIFACTS'] = '1';
+      }
+
+      run('npx', args, Object.keys(env).length > 0 ? env : undefined);
+    });
+
+  test
     .command('e2e')
     .description('Run end-to-end tests')
     .option('--tier <n>', 'run only the specified tier')

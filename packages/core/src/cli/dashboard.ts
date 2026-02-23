@@ -321,7 +321,8 @@ function renderOverview(
         : '';
     const prefix = isSelected ? theme.borderFocus('> ') : '  ';
     const promptW = innerW - 44;
-    const prompt = t.prompt.length > promptW ? t.prompt.slice(0, promptW - 3) + '...' : t.prompt;
+    const promptFlat = t.prompt.replace(/[\n\r]+/g, ' ');
+    const prompt = promptFlat.length > promptW ? promptFlat.slice(0, promptW - 3) + '...' : promptFlat;
     return `${prefix}${dot} ${theme.dim(id)}  ${status} ${agent} ${prompt}  ${theme.dim(dur)}`;
   });
   if (recentLines.length === 0) {

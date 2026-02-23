@@ -116,10 +116,12 @@ export class Orchestrator {
     this.running = true;
     logger.info('Orchestrator started');
 
-    // Graceful shutdown on signals
+    // Graceful shutdown on signals — run full shutdown to kill tmux,
+    // cancel pending tasks, and clean up state files.
     const signalHandler = () => {
       logger.info('Orchestrator: received shutdown signal');
       this.running = false;
+      this.shutdown().catch(() => {});
     };
     process.on('SIGINT', signalHandler);
     process.on('SIGTERM', signalHandler);
@@ -185,6 +187,17 @@ export class Orchestrator {
     await Promise.allSettled(stopPromises);
     this.workers.clear();
     this.responseEngines.clear();
+
+    // Mark any remaining pending tasks as cancelled so they don't linger
+    // in shared storage as "pending" after this orchestrator exits.
+    if (this.taskStorage) {
+      for (const task of this.pendingTasks) {
+        task.status = 'cancelled';
+        task.completedAt = new Date().toISOString();
+        await this.taskStorage.save(task).catch(() => {});
+      }
+    }
+    this.pendingTasks = [];
 
     // Write final "stopped" state for TUI
     await this.clearSessionState();

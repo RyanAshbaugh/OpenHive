@@ -174,9 +174,10 @@ export class WorkerSession {
       if (!this.info.assignment.idleDetectedAt) {
         this.info.assignment.idleDetectedAt = refined.timestamp;
       }
-    } else if (refined.state !== 'idle' && this.info.assignment?.idleDetectedAt) {
-      // Agent left idle state — reset settling
+    } else if (refined.state !== 'idle' && this.info.assignment) {
+      // Agent left idle state — reset settling and mark that it has worked
       this.info.assignment.idleDetectedAt = undefined;
+      this.info.assignment.hasWorked = true;
     }
 
     this.info.lastCheckAt = refined.timestamp;

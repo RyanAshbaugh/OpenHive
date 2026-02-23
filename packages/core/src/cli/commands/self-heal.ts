@@ -7,9 +7,14 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { AgentRegistry } from '../../agents/registry.js';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { Orchestrator } from '../../orchestrator/orchestrator.js';
+import { createTask } from '../../tasks/task.js';
+import { TaskStorage } from '../../tasks/storage.js';
 import { logger } from '../../utils/logger.js';
-import type { AgentRunResult } from '../../agents/adapter.js';
+
+const DEFAULT_TASK_STORAGE_DIR = join(homedir(), '.openhive', 'tasks');
 
 const execFileAsync = promisify(execFile);
 
@@ -32,7 +37,8 @@ export interface SelfHealResult {
   success: boolean;
   attempts: number;
   lastTestOutput?: string;
-  lastAgentResult?: AgentRunResult;
+  /** Reason the last fix attempt failed (from orchestrator), if any. */
+  lastFailReason?: string;
 }
 
 /** Max lines to include in a single prompt before truncating. */
@@ -82,15 +88,9 @@ export async function runWithSelfHealing(
     testTimeout = 120_000,
   } = options;
 
-  const registry = new AgentRegistry();
-  const adapter = registry.get(agentName);
-  if (!adapter) {
-    throw new Error(`Unknown agent: ${agentName}. Available: ${registry.getAll().map(a => a.name).join(', ')}`);
-  }
-
   let attempts = 0;
   let lastTestOutput: string | undefined;
-  let lastAgentResult: AgentRunResult | undefined;
+  let lastFailReason: string | undefined;
 
   while (attempts <= maxRetries) {
     attempts++;
@@ -132,18 +132,35 @@ export async function runWithSelfHealing(
       break;
     }
 
-    // Dispatch fix to agent
+    // Dispatch fix to agent via orchestrator
     const prompt = buildFixPrompt(stdout, stderr);
-    logger.info(`Self-heal: dispatching fix to ${agentName}...`);
+    logger.info(`Self-heal: dispatching fix to ${agentName} via orchestrator...`);
 
-    lastAgentResult = await adapter.run({
-      prompt,
-      cwd,
-      timeout: 300_000, // 5 min for agent to fix
+    const taskStorage = new TaskStorage(DEFAULT_TASK_STORAGE_DIR);
+    const orchestrator = new Orchestrator({
+      config: {
+        maxWorkers: 1,
+        autoApprove: true,
+        tickIntervalMs: 2000,
+        useWorktrees: false,     // Fix in-place — agent edits same dir tests run in
+        repoRoot: cwd,
+        stuckTimeoutMs: 180_000, // 3 min
+        taskTimeoutMs: 300_000,  // 5 min per fix attempt
+      },
+      taskStorage,
+      onEvent: (e) => logger.info(`Self-heal [${e.type}]`),
     });
 
-    if (lastAgentResult.exitCode !== 0) {
-      logger.warn(`Self-heal: agent exited with code ${lastAgentResult.exitCode}`);
+    const task = createTask(prompt, `selfheal-${attempts}`, { agent: agentName });
+    orchestrator.queueTask(task);
+    await orchestrator.start();
+
+    const taskSucceeded = orchestrator.isTaskCompleted(task.id);
+    lastFailReason = orchestrator.getFailureReason(task.id);
+    await orchestrator.shutdown();
+
+    if (!taskSucceeded) {
+      logger.warn(`Self-heal: agent fix failed${lastFailReason ? `: ${lastFailReason}` : ''}`);
     }
   }
 
@@ -151,6 +168,6 @@ export async function runWithSelfHealing(
     success: false,
     attempts,
     lastTestOutput,
-    lastAgentResult,
+    lastFailReason,
   };
 }
