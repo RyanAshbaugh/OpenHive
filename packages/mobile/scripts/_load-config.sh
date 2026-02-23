@@ -15,7 +15,7 @@
 #   HOOK_POST_BUILD, HOOK_POST_BOOT, HOOK_POST_INSTALL,
 #   HOOK_POST_LAUNCH, HOOK_POST_AUTH, HOOK_POST_SETUP
 
-PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+export PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 _CONFIG_FILE="${PROJECT_DIR}/${OPENHIVE_MOBILE_CONFIG:-.openhive/mobile.json5}"
 
 if [ ! -f "$_CONFIG_FILE" ]; then
@@ -106,6 +106,13 @@ sh_export("KEYCHAIN_SERVICE", au["keychainService"])
 sh_export("AUTH_ENV_FILE", au["envFile"])
 sh_export("AUTH_URL_ENV_VAR", au["urlEnvVar"])
 sh_export("AUTH_KEY_ENV_VAR", au["keyEnvVar"])
+
+import re
+slug = re.sub(r'[^a-z0-9]+', '-', a["appName"].lower()).strip('-')
+sh_export("METRO_SESSION", f"ohmobile-metro-{slug}")
+
+ag = cfg.get("agent", {})
+sh_export("AGENT_CLI", ag.get("cli", "claude"))
 
 h = cfg.get("hooks", {})
 sh_export("HOOK_POST_BUILD", h.get("postBuild", ""))

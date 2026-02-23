@@ -144,6 +144,17 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
 
     // Start the date animation
     let current = new Date(start);
+    const skipDaysSet = scene.skipDays ? new Set(scene.skipDays) : null;
+
+    // Advance past any skipped days
+    const advancePastSkipped = () => {
+      if (!skipDaysSet) return;
+      while (current <= end && skipDaysSet.has(current.getDay())) {
+        current = addDays(current, 1);
+      }
+    };
+
+    advancePastSkipped();
 
     _timer = setInterval(async () => {
       if (current > end) {
@@ -157,6 +168,7 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
       setSimulatedDate(current);
       onTick?.(current);
       current = addDays(current, scene.stepDays);
+      advancePastSkipped();
     }, scene.intervalMs);
   }
 
@@ -199,6 +211,11 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
     return scenes[sceneName] || null;
   }
 
+  /** Get the currently running scene config (or null). */
+  function getCurrentScene() {
+    return _currentScene;
+  }
+
   // -------------------------------------------------------------------------
   // React hooks
   // -------------------------------------------------------------------------
@@ -238,6 +255,7 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
     isSimulationActive,
     getSceneNames,
     getScene,
+    getCurrentScene,
     useSimulationData,
     useSimulationSetup,
   };

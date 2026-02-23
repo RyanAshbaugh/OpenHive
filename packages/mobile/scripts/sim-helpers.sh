@@ -187,6 +187,26 @@ wait_for_element() {
   return 1
 }
 
+# Dismiss any visible system alerts or error overlays.
+# Tries common iOS alert button labels and React Native LogBox close buttons.
+# Safe to call even when no alerts are present.
+dismiss_alerts() {
+  local dismissed=false
+  for label in "Not Now" "OK" "Allow" "Cancel" "Close" "Dismiss" "Later" "Remind Me Later"; do
+    if tap_button "$label" 2>/dev/null; then
+      dismissed=true
+      sleep 0.5
+    fi
+  done
+  # React Native LogBox close button (the ✕ in the bottom error bar)
+  # It's typically a small element — look for any close/dismiss element
+  tap_button "Dismiss (ESC)" 2>/dev/null && dismissed=true || true
+  if [ "$dismissed" = true ]; then
+    echo "  Dismissed alert(s)"
+    sleep 0.5
+  fi
+}
+
 # List all visible labels on screen (useful for debugging)
 list_ui_elements() {
   local sim_id

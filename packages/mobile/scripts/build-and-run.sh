@@ -94,7 +94,6 @@ xcrun simctl install "$SIM_NAME" "$APP_PATH"
 run_hook "$HOOK_POST_INSTALL"
 
 # --- Step 4: Start Metro ---
-METRO_SESSION="ohmobile-metro"
 echo "[4/7] Starting Metro bundler (tmux: $METRO_SESSION)..."
 lsof -ti:$METRO_PORT | xargs kill -9 2>/dev/null || true
 tmux kill-session -t "$METRO_SESSION" 2>/dev/null || true
@@ -179,5 +178,5 @@ echo "==========================================="
 echo ""
 echo "Useful commands:"
 echo "  Metro logs:  tmux attach -t $METRO_SESSION"
-echo "  Stop Metro:  tmux kill-session -t $METRO_SESSION"
-echo "  Stop sim:    xcrun simctl shutdown '$SIM_NAME'"
+echo "  Stop Metro:  ohmobile stop"
+echo "  Stop all:    ohmobile stop --sim"

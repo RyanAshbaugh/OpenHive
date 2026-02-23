@@ -16,6 +16,9 @@ set -euo pipefail
 #   creds            Set up keychain credentials
 #   creds --verify   Verify stored credentials
 #   creds --delete   Delete stored credentials
+#   stop             Stop this project's Metro bundler
+#   stop --sim       Stop Metro and shut down simulator
+#   scenes           List available simulation scenes
 #   simulate <scene> Trigger a simulation scene via deep link
 #   record <scene>   Record a simulation (stub — not yet implemented)
 #   help             Show this help
@@ -40,6 +43,43 @@ _load_config() {
   source "$SCRIPTS_DIR/_load-config.sh"
 }
 
+# Find and list scene files in the project
+_list_scenes() {
+  local scenes_dir=""
+  # Search common locations for scenes directory
+  for candidate in \
+    "$PROJECT_DIR/src/simulation/scenes" \
+    "$PROJECT_DIR/simulation/scenes" \
+    "$PROJECT_DIR/scenes"; do
+    if [ -d "$candidate" ]; then
+      scenes_dir="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$scenes_dir" ]; then
+    echo "No scenes directory found."
+    return 1
+  fi
+
+  local rel_dir="${scenes_dir#"$PROJECT_DIR"/}"
+  echo "Scenes ($rel_dir/):"
+  echo ""
+  local found=false
+  for f in "$scenes_dir"/*.js; do
+    [ -f "$f" ] || continue
+    local scene_name
+    scene_name="$(basename "$f" .js)"
+    [ "$scene_name" = "index" ] && continue
+    echo "  $scene_name"
+    found=true
+  done
+  if [ "$found" = false ]; then
+    echo "  (none)"
+  fi
+  echo ""
+}
+
 case "$CMD" in
   run)
     exec "$SCRIPTS_DIR/build-and-run.sh" "$@"
@@ -50,6 +90,10 @@ case "$CMD" in
   creds|credentials)
     exec "$SCRIPTS_DIR/setup-credentials.sh" "$@"
     ;;
+  scenes)
+    _load_config
+    _list_scenes
+    ;;
   simulate)
     _load_config
     SCENE="${1:-}"
@@ -59,8 +103,7 @@ case "$CMD" in
       echo "Sends a deep link to the running simulator to trigger a simulation scene."
       echo "The app must be running and authenticated first."
       echo ""
-      echo "Example:"
-      echo "  ohmobile simulate heatmap-timelapse"
+      _list_scenes
       exit 0
     fi
     shift
@@ -68,6 +111,9 @@ case "$CMD" in
     QUERY="scene=$SCENE"
     [ -n "$SPEED" ] && QUERY="$QUERY&speed=$SPEED"
     echo "Triggering simulation: $SCENE"
+    # Dismiss any system alerts or error overlays before starting
+    source "$SCRIPTS_DIR/sim-helpers.sh"
+    dismiss_alerts
     xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?$QUERY"
     ;;
   record)
@@ -107,6 +153,10 @@ case "$CMD" in
     echo "  Duration: ${DURATION}s"
     echo ""
 
+    # Dismiss any system alerts or error overlays before recording
+    source "$SCRIPTS_DIR/sim-helpers.sh"
+    dismiss_alerts
+
     # Start recording in background
     xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
     RECORD_PID=$!
@@ -138,6 +188,10 @@ case "$CMD" in
       fi
     fi
     ;;
+  stop)
+    _load_config
+    exec "$SCRIPTS_DIR/stop.sh" "$@"
+    ;;
   clean)
     _load_config
     exec "$SCRIPTS_DIR/clean-video.sh" --device "$SIM_NAME" "$@"
@@ -155,6 +209,9 @@ case "$CMD" in
     echo "  creds            Set up keychain credentials interactively"
     echo "  creds --verify   Verify stored credentials against API"
     echo "  creds --delete   Delete stored credentials"
+    echo "  stop             Stop this project's Metro bundler"
+    echo "  stop --sim       Stop Metro and shut down simulator"
+    echo "  scenes           List available simulation scenes"
     echo "  simulate <scene> Trigger a simulation scene via deep link"
     echo "  record <scene>   Record screen during a simulation scene"
     echo "  clean <file>     Remove status bar from a video or screenshot"
