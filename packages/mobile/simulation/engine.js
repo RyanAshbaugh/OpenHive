@@ -1,5 +1,14 @@
 /**
- * SimulationEngine — generic date-advancing simulation engine.
+ * SimulationEngine — generic simulation engine.
+ *
+ * Supports two scene modes:
+ *
+ *   1. Date-based (dataGenerators) — advances through a date range, calling
+ *      generators for each day. Used for timelapses and trend animations.
+ *
+ *   2. Step-based (steps) — stays on a fixed date and iterates through an
+ *      array of step functions that mutate simulation data in place. Used for
+ *      demos that show actions happening within a single screen/day.
  *
  * Handles the timer loop, data generation, state management, React hooks,
  * and profile setup/teardown lifecycle. Apps provide the app-specific parts
@@ -95,21 +104,22 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
   // -------------------------------------------------------------------------
 
   /**
-   * Start a simulation scene.
+   * Setup a simulation scene without starting the timer.
    *
    * 1. Tears down any leftover entities from a previous run
-   * 2. Creates profile entities via onSetup (idempotent)
-   * 3. Pre-generates all data from dataGenerators
-   * 4. Starts a timer that advances the simulated date
+   * 2. Creates profile entities via onSetup
+   * 3. For date-based scenes: pre-generates all data from dataGenerators
+   *    For step-based scenes: runs step 0 to initialize data
+   *
+   * Call runScene() afterwards to start the animation.
    */
-  async function startScene(sceneName, { onTick, onComplete, onSetupComplete } = {}) {
+  async function setupScene(sceneName, { onSetupComplete } = {}) {
     const scene = scenes[sceneName];
     if (!scene) throw new Error(`Unknown scene: ${sceneName}`);
 
     stopScene();
 
     _simulationData = {};
-    _simulationActive = true;
     _currentScene = scene;
 
     // Teardown leftover entities from a previous run
@@ -122,54 +132,108 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
       onSetupComplete?.();
     }
 
-    // Pre-generate all data
-    const start = new Date(scene.startDate);
-    const end = scene.endDate ? new Date(scene.endDate) : new Date();
+    if (scene.steps) {
+      // Step-based scene: run step 0 to initialize data
+      if (scene.steps.length > 0) {
+        scene.steps[0](_simulationData);
+      }
+    } else {
+      // Date-based scene: pre-generate all data
+      const start = new Date(scene.startDate);
+      const end = scene.endDate ? new Date(scene.endDate) : new Date();
 
-    if (scene.dataGenerators) {
-      const generators = scene.dataGenerators;
-      let d = new Date(start);
-      while (d <= end) {
-        const dateStr = localYMD(d);
-        for (const [name, gen] of Object.entries(generators)) {
-          const val = gen(d);
-          if (val) {
-            if (!_simulationData[name]) _simulationData[name] = {};
-            _simulationData[name][dateStr] = val;
+      if (scene.dataGenerators) {
+        const generators = scene.dataGenerators;
+        let d = new Date(start);
+        while (d <= end) {
+          const dateStr = localYMD(d);
+          for (const [name, gen] of Object.entries(generators)) {
+            const val = gen(d);
+            if (val) {
+              if (!_simulationData[name]) _simulationData[name] = {};
+              _simulationData[name][dateStr] = val;
+            }
           }
+          d = addDays(d, 1);
         }
-        d = addDays(d, 1);
       }
     }
 
-    // Start the date animation
-    let current = new Date(start);
-    const skipDaysSet = scene.skipDays ? new Set(scene.skipDays) : null;
+    console.log('[Sim] Scene setup complete, ready to run');
+  }
 
-    // Advance past any skipped days
-    const advancePastSkipped = () => {
-      if (!skipDaysSet) return;
-      while (current <= end && skipDaysSet.has(current.getDay())) {
-        current = addDays(current, 1);
-      }
-    };
+  /**
+   * Run the timer for a previously set-up scene.
+   * Must call setupScene() first.
+   */
+  function runScene({ onTick, onComplete } = {}) {
+    const scene = _currentScene;
+    if (!scene) throw new Error('No scene set up. Call setupScene first.');
 
-    advancePastSkipped();
+    _simulationActive = true;
 
-    _timer = setInterval(async () => {
-      if (current > end) {
-        stopScene();
-        setSimulatedDate(null);
-        await _teardown();
-        _notifySetupListeners();
-        onComplete?.();
-        return;
-      }
-      setSimulatedDate(current);
-      onTick?.(current);
-      current = addDays(current, scene.stepDays);
+    if (scene.steps) {
+      // Step-based mode: stay on a fixed date, iterate through steps.
+      // Each step mutates _simulationData; re-setting the date triggers re-renders.
+      const fixedDate = new Date(scene.simulatedDate || scene.startDate);
+      let stepIdx = 1; // step 0 was already run during setup
+
+      setSimulatedDate(fixedDate);
+
+      _timer = setInterval(async () => {
+        if (stepIdx >= scene.steps.length) {
+          stopScene();
+          setSimulatedDate(null);
+          await _teardown();
+          _notifySetupListeners();
+          onComplete?.();
+          return;
+        }
+        scene.steps[stepIdx](_simulationData);
+        setSimulatedDate(new Date(fixedDate)); // re-set to trigger re-renders
+        onTick?.(fixedDate);
+        stepIdx++;
+      }, scene.intervalMs);
+    } else {
+      // Date-based mode: advance through dates
+      const start = new Date(scene.startDate);
+      const end = scene.endDate ? new Date(scene.endDate) : new Date();
+      let current = new Date(start);
+      const skipDaysSet = scene.skipDays ? new Set(scene.skipDays) : null;
+
+      const advancePastSkipped = () => {
+        if (!skipDaysSet) return;
+        while (current <= end && skipDaysSet.has(current.getDay())) {
+          current = addDays(current, 1);
+        }
+      };
+
       advancePastSkipped();
-    }, scene.intervalMs);
+
+      _timer = setInterval(async () => {
+        if (current > end) {
+          stopScene();
+          setSimulatedDate(null);
+          await _teardown();
+          _notifySetupListeners();
+          onComplete?.();
+          return;
+        }
+        setSimulatedDate(current);
+        onTick?.(current);
+        current = addDays(current, scene.stepDays);
+        advancePastSkipped();
+      }, scene.intervalMs);
+    }
+  }
+
+  /**
+   * Start a simulation scene (setup + run in one call).
+   * Convenience wrapper — equivalent to setupScene() then runScene().
+   */
+  async function startScene(sceneName, { onTick, onComplete, onSetupComplete } = {}) {
+    await setupScene(sceneName, { onSetupComplete });
+    runScene({ onTick, onComplete });
   }
 
   /** Stop the current scene (keeps data for final frame). */
@@ -248,6 +312,8 @@ export function createSimulationEngine({ scenes, dateProvider, onSetup, onTeardo
   }
 
   return {
+    setupScene,
+    runScene,
     startScene,
     stopScene,
     resetSimulation,

@@ -20,7 +20,7 @@ set -euo pipefail
 #   stop --sim       Stop Metro and shut down simulator
 #   scenes           List available simulation scenes
 #   simulate <scene> Trigger a simulation scene via deep link
-#   record <scene>   Record a simulation (stub — not yet implemented)
+#   record <scene>   Record a simulation (two-phase: setup then run)
 #   generate-scene   Generate a scene JS file using an AI agent
 #   help             Show this help
 #
@@ -121,28 +121,72 @@ case "$CMD" in
     _load_config
     SCENE="${1:-}"
     if [ -z "$SCENE" ]; then
-      echo "Usage: ohmobile record <scene> [--duration <seconds>]"
+      echo "Usage: ohmobile record <scene> [options]"
       echo ""
-      echo "Starts screen recording, triggers simulation, waits, stops recording."
+      echo "Two-phase recording: sets up the scene (entities, navigation), waits"
+      echo "for the UI to settle, starts recording, then runs the simulation."
       echo "The app must be running and authenticated first."
       echo ""
       echo "Options:"
-      echo "  --duration <sec>  Recording duration (default: 35)"
+      echo "  --duration <sec>      Simulation recording duration (default: from scene JS or 35)"
+      echo "  --setup-delay <sec>   Wait after setup before recording (default: from scene JS or 6)"
+      echo "  --run-delay <sec>     Wait after recording starts before running (default: from scene JS or 1)"
+      echo ""
+      echo "Defaults are read from the scene JS file's 'recording' block if present."
       echo ""
       echo "Example:"
       echo "  ohmobile record heatmap-timelapse"
-      echo "  ohmobile record heatmap-timelapse --duration 45"
+      echo "  ohmobile record heatmap-timelapse --duration 20 --setup-delay 8"
       exit 0
     fi
     shift
 
-    DURATION=35
+    # Parse CLI flags first
+    DURATION_FLAG=""
+    SETUP_DELAY_FLAG=""
+    RUN_DELAY_FLAG=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --duration) DURATION="$2"; shift 2 ;;
+        --duration) DURATION_FLAG="$2"; shift 2 ;;
+        --setup-delay) SETUP_DELAY_FLAG="$2"; shift 2 ;;
+        --run-delay) RUN_DELAY_FLAG="$2"; shift 2 ;;
         *) shift ;;
       esac
     done
+
+    # Read a numeric value from the scene JS file's recording block
+    _scene_opt() {
+      local file="$1" key="$2" default="$3"
+      local val
+      val=$(grep -oE "${key}:\s*[0-9.]+" "$file" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)
+      echo "${val:-$default}"
+    }
+
+    # Find scene file using the same search paths as _list_scenes
+    _find_scene_file() {
+      local scene="$1"
+      for candidate in \
+        "$PROJECT_DIR/src/simulation/scenes" \
+        "$PROJECT_DIR/simulation/scenes" \
+        "$PROJECT_DIR/scenes"; do
+        if [ -f "$candidate/${scene}.js" ]; then
+          echo "$candidate/${scene}.js"
+          return
+        fi
+      done
+      echo ""
+    }
+
+    SCENE_FILE=$(_find_scene_file "$SCENE")
+    if [ -n "$SCENE_FILE" ]; then
+      DURATION=${DURATION_FLAG:-$(_scene_opt "$SCENE_FILE" "duration" "35")}
+      SETUP_DELAY=${SETUP_DELAY_FLAG:-$(_scene_opt "$SCENE_FILE" "setupDelay" "6")}
+      RUN_DELAY=${RUN_DELAY_FLAG:-$(_scene_opt "$SCENE_FILE" "runDelay" "1")}
+    else
+      DURATION=${DURATION_FLAG:-35}
+      SETUP_DELAY=${SETUP_DELAY_FLAG:-6}
+      RUN_DELAY=${RUN_DELAY_FLAG:-1}
+    fi
 
     RECORDINGS_DIR="$PROJECT_DIR/.openhive/recordings"
     mkdir -p "$RECORDINGS_DIR"
@@ -150,26 +194,40 @@ case "$CMD" in
     OUTPUT="$RECORDINGS_DIR/${SCENE}-${TIMESTAMP}.mov"
 
     echo "=== Recording: $SCENE ==="
-    echo "  Output:   $OUTPUT"
-    echo "  Duration: ${DURATION}s"
+    echo "  Output:      $OUTPUT"
+    echo "  Duration:    ${DURATION}s"
+    echo "  Setup delay: ${SETUP_DELAY}s"
+    echo "  Run delay:   ${RUN_DELAY}s"
     echo ""
 
     # Dismiss any system alerts or error overlays before recording
     source "$SCRIPTS_DIR/sim-helpers.sh"
     dismiss_alerts
 
-    # Start recording in background
+    # Phase 1: Setup — create entities, navigate to screen, let UI settle
+    echo "  [1/4] Setting up scene..."
+    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=setup"
+    echo "  Waiting ${SETUP_DELAY}s for setup..."
+    sleep "$SETUP_DELAY"
+
+    # Phase 2: Start recording (UI is settled, plots are visible)
+    echo "  [2/4] Starting recording..."
     xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
     RECORD_PID=$!
-    sleep 2
-
-    # Trigger simulation
-    echo "  Triggering simulation..."
-    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE"
-
-    # Wait for simulation + buffer
-    echo "  Recording for ${DURATION}s... (Ctrl+C to stop early)"
     trap "kill -INT $RECORD_PID 2>/dev/null; wait $RECORD_PID 2>/dev/null; echo ''; echo 'Recording saved: $OUTPUT'; exit 0" INT
+    sleep 2  # let recorder initialize
+
+    # Phase 3: Small delay so recording captures the settled state briefly
+    if [ "$RUN_DELAY" -gt 0 ] 2>/dev/null; then
+      echo "  [3/4] Waiting ${RUN_DELAY}s before starting simulation..."
+      sleep "$RUN_DELAY"
+    fi
+
+    # Phase 4: Run — start the date animation
+    echo "  [4/4] Running simulation..."
+    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=run"
+
+    echo "  Recording for ${DURATION}s... (Ctrl+C to stop early)"
     sleep "$DURATION"
 
     # Stop recording (SIGINT for clean .mov finalization)
