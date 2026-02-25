@@ -129,8 +129,38 @@ if [ "$IS_VIDEO" = true ]; then
     MAP="-map [clean]"
   fi
 
+  # Get the true playback duration from the MOV edit list (QuickTime-reported duration).
+  # Simulator .mov files use edit lists that extend beyond the last frame's timestamp,
+  # holding the final frame on screen. ffmpeg ignores this by default, so we use tpad
+  # to clone the last frame and -t to match the original playback length.
+  EDIT_DUR=$(ffprobe -v debug "$INPUT" 2>&1 \
+    | grep -o 'edit list 0 - media time: [0-9]*, duration: [0-9]*' \
+    | grep -o 'duration: [0-9]*' | grep -o '[0-9]*')
+  STREAM_TB=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=time_base -of csv=p=0 "$INPUT" | sed 's|1/||')
+  [ -z "$STREAM_TB" ] && STREAM_TB=600
+
+  if [ -n "$EDIT_DUR" ] && [ "$EDIT_DUR" -gt 0 ] 2>/dev/null; then
+    REAL_DUR=$(python3 -c "print(f'{$EDIT_DUR / $STREAM_TB:.6f}')")
+    STREAM_DUR=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=duration -of csv=p=0 "$INPUT")
+    PAD_DUR=$(python3 -c "print(f'{$EDIT_DUR / $STREAM_TB - ${STREAM_DUR:-0}:.6f}')")
+    IS_POSITIVE=$(python3 -c "print('yes' if $EDIT_DUR / $STREAM_TB > ${STREAM_DUR:-0} else 'no')")
+    if [ "$IS_POSITIVE" = "yes" ]; then
+      # Append the clean step with tpad to clone the last frame for the missing time
+      FILTER="${FILTER};[clean]tpad=stop_mode=clone:stop_duration=${PAD_DUR}[padded]"
+      if [ -n "$RESIZE" ]; then
+        W="${RESIZE%%x*}"
+        H="${RESIZE##*x}"
+        FILTER="${FILTER};[padded]scale=${W}:-2,crop=${W}:${H}:0:in_h-${H}[out]"
+        MAP="-map [out]"
+      else
+        MAP="-map [padded]"
+      fi
+    fi
+  fi
+
   ffmpeg -i "$INPUT" -filter_complex "$FILTER" \
-    $MAP -r 30 -c:v h264 -pix_fmt yuv420p -movflags +faststart -an -y "$OUTPUT" 2>/dev/null
+    $MAP -fps_mode passthrough \
+    -c:v h264 -pix_fmt yuv420p -movflags +faststart -an -y "$OUTPUT" 2>/dev/null
 
 else
   # Image: use ImageMagick
