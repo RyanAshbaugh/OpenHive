@@ -133,13 +133,40 @@ except:
 " 2>/dev/null
 }
 
-# Tap at coordinates
+# Tap at coordinates (accessibility tap — fast, no visual press effect)
 tap() {
   local x="$1"
   local y="$2"
   local sim_id
   sim_id=$(get_sim_udid)
   xcodebuildmcp ui-automation tap --simulator-id "$sim_id" --x "$x" --y "$y" 2>/dev/null
+}
+
+# Touch-tap at coordinates (real touch down/up — shows visual press effect)
+touch_tap() {
+  local x="$1"
+  local y="$2"
+  local sim_id
+  sim_id=$(get_sim_udid)
+  xcodebuildmcp ui-automation touch --simulator-id "$sim_id" --x "$x" --y "$y" --down 2>/dev/null
+  sleep 0.30
+  xcodebuildmcp ui-automation touch --simulator-id "$sim_id" --x "$x" --y "$y" --up 2>/dev/null
+}
+
+# Find a button by label and touch-tap it (real press with visual feedback).
+# Returns 0 on success, 1 if not found.
+touch_tap_button() {
+  local label="$1"
+  local coords
+  coords=$(find_button "$label")
+  if [ -n "$coords" ]; then
+    local x=$(echo "$coords" | cut -d' ' -f1)
+    local y=$(echo "$coords" | cut -d' ' -f2)
+    echo "  Tapping '$label' at ($x, $y)"
+    touch_tap "$x" "$y"
+    return 0
+  fi
+  return 1
 }
 
 # Find a button by label and tap it. Returns 0 on success, 1 if not found.
@@ -214,6 +241,17 @@ toggle_software_keyboard() {
     -e 'tell application "Simulator" to activate' \
     -e 'delay 0.3' \
     -e 'tell application "System Events" to keystroke "k" using command down'
+}
+
+# Show the software keyboard if it's not already visible.
+# Checks for keyboard keys in the accessibility tree before toggling.
+show_software_keyboard() {
+  local coords
+  coords=$(find_button "space" 2>/dev/null)
+  [ -n "$coords" ] && return 0  # already visible
+  coords=$(find_button " " 2>/dev/null)
+  [ -n "$coords" ] && return 0  # already visible
+  toggle_software_keyboard
 }
 
 # Send a keystroke to the simulator via System Events.
