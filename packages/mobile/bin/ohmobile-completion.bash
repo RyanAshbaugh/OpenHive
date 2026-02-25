@@ -25,6 +25,7 @@ _ohmobile_completions() {
     simulate|record|generate-scene)
       local scenes_dir=""
       local project_dir="${PROJECT_DIR:-$(pwd)}"
+      local scene_names=""
       for candidate in \
         "$project_dir/src/simulation/scenes" \
         "$project_dir/simulation/scenes" \
@@ -36,7 +37,6 @@ _ohmobile_completions() {
       done
 
       if [ -n "$scenes_dir" ]; then
-        local scene_names=""
         for f in "$scenes_dir"/*.js; do
           [ -f "$f" ] || continue
           local name
@@ -44,8 +44,15 @@ _ohmobile_completions() {
           [ "$name" = "index" ] && continue
           scene_names="$scene_names $name"
         done
-        COMPREPLY=($(compgen -W "$scene_names" -- "$cur"))
+        for f in "$scenes_dir"/*.sh; do
+          [ -f "$f" ] || continue
+          local name
+          name="$(basename "$f" .sh)"
+          scene_names="$scene_names $name"
+        done
       fi
+
+      COMPREPLY=($(compgen -W "$scene_names" -- "$cur"))
       return
       ;;
     run)

@@ -58,26 +58,52 @@ _list_scenes() {
     fi
   done
 
-  if [ -z "$scenes_dir" ]; then
-    echo "No scenes directory found."
-    return 1
+  local found=false
+
+  if [ -n "$scenes_dir" ]; then
+    local rel_dir="${scenes_dir#"$PROJECT_DIR"/}"
+    echo "Scenes ($rel_dir/):"
+    echo ""
+    for f in "$scenes_dir"/*.js; do
+      [ -f "$f" ] || continue
+      local scene_name
+      scene_name="$(basename "$f" .js)"
+      [ "$scene_name" = "index" ] && continue
+      echo "  $scene_name"
+      found=true
+    done
+    for f in "$scenes_dir"/*.sh; do
+      [ -f "$f" ] || continue
+      local scene_name
+      scene_name="$(basename "$f" .sh)"
+      echo "  $scene_name  (scripted)"
+      found=true
+    done
   fi
 
-  local rel_dir="${scenes_dir#"$PROJECT_DIR"/}"
-  echo "Scenes ($rel_dir/):"
-  echo ""
-  local found=false
-  for f in "$scenes_dir"/*.js; do
-    [ -f "$f" ] || continue
-    local scene_name
-    scene_name="$(basename "$f" .js)"
-    [ "$scene_name" = "index" ] && continue
-    echo "  $scene_name"
-    found=true
-  done
   if [ "$found" = false ]; then
-    echo "  (none)"
+    echo "No scenes found."
+    return 1
   fi
+  echo ""
+}
+
+# Find a scene file by name — checks .js then .sh per search directory
+_find_scene_file() {
+  local scene="$1"
+  for candidate in \
+    "$PROJECT_DIR/src/simulation/scenes" \
+    "$PROJECT_DIR/simulation/scenes" \
+    "$PROJECT_DIR/scenes"; do
+    if [ -f "$candidate/${scene}.js" ]; then
+      echo "$candidate/${scene}.js"
+      return
+    fi
+    if [ -f "$candidate/${scene}.sh" ]; then
+      echo "$candidate/${scene}.sh"
+      return
+    fi
+  done
   echo ""
 }
 
@@ -101,21 +127,45 @@ case "$CMD" in
     if [ -z "$SCENE" ] || [ "$SCENE" = "--list" ]; then
       echo "Usage: ohmobile simulate <scene>"
       echo ""
-      echo "Sends a deep link to the running simulator to trigger a simulation scene."
-      echo "The app must be running and authenticated first."
+      echo "Runs a scene without recording."
+      echo "  .js scenes send a deep link to the app's simulation engine."
+      echo "  .sh scenes open a URL and run scripted UI automation."
       echo ""
       _list_scenes
       exit 0
     fi
     shift
-    SPEED="${1:-}"
-    QUERY="scene=$SCENE"
-    [ -n "$SPEED" ] && QUERY="$QUERY&speed=$SPEED"
-    echo "Triggering simulation: $SCENE"
-    # Dismiss any system alerts or error overlays before starting
+
     source "$SCRIPTS_DIR/sim-helpers.sh"
     dismiss_alerts
-    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?$QUERY"
+
+    SCENE_FILE=$(_find_scene_file "$SCENE")
+
+    if [ -n "$SCENE_FILE" ] && [[ "$SCENE_FILE" == *.sh ]]; then
+      # Scripted scene — open URL + run actions (no recording)
+      source "$SCENE_FILE"
+      echo "Running scripted scene: $SCENE"
+      if [ -n "${SCENE_URL:-}" ]; then
+        echo "  Opening URL: $SCENE_URL"
+        xcrun simctl openurl "$SIM_NAME" "$SCENE_URL"
+        echo "  Waiting for page to load..."
+        sleep 3
+      fi
+      if [ -n "${SCENE_PRE_DELAY:-}" ] && [ "$SCENE_PRE_DELAY" -gt 0 ] 2>/dev/null; then
+        echo "  Pre-delay ${SCENE_PRE_DELAY}s..."
+        sleep "$SCENE_PRE_DELAY"
+      fi
+      echo "  Running scene actions..."
+      run_scene
+      echo "  Done."
+    else
+      # JS scene — deep link to in-app simulation engine
+      SPEED="${1:-}"
+      QUERY="scene=$SCENE"
+      [ -n "$SPEED" ] && QUERY="$QUERY&speed=$SPEED"
+      echo "Triggering simulation: $SCENE"
+      xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?$QUERY"
+    fi
     ;;
   record)
     _load_config
@@ -123,20 +173,22 @@ case "$CMD" in
     if [ -z "$SCENE" ]; then
       echo "Usage: ohmobile record <scene> [options]"
       echo ""
-      echo "Two-phase recording: sets up the scene (entities, navigation), waits"
-      echo "for the UI to settle, starts recording, then runs the simulation."
-      echo "The app must be running and authenticated first."
+      echo "Records the simulator screen while running a scene."
+      echo ""
+      echo "Scene types (determined by file extension):"
+      echo "  .js  In-app simulation — two-phase deep-link flow (setup + run)"
+      echo "  .sh  Scripted UI automation — opens a URL, runs tap/wait actions"
       echo ""
       echo "Options:"
-      echo "  --duration <sec>      Simulation recording duration (default: from scene JS or 35)"
-      echo "  --setup-delay <sec>   Wait after setup before recording (default: from scene JS or 6)"
-      echo "  --run-delay <sec>     Wait after recording starts before running (default: from scene JS or 1)"
+      echo "  --duration <sec>      Recording duration (default: from scene file or 35)"
+      echo "  --setup-delay <sec>   Wait after setup before recording (default: 6, JS only)"
+      echo "  --run-delay <sec>     Wait after recording starts before running (default: 1, JS only)"
+      echo "  --pre-delay <sec>     Seconds before actions start (default: from scene file or 2, scripted only)"
       echo ""
-      echo "Defaults are read from the scene JS file's 'recording' block if present."
-      echo ""
-      echo "Example:"
-      echo "  ohmobile record heatmap-timelapse"
-      echo "  ohmobile record heatmap-timelapse --duration 20 --setup-delay 8"
+      echo "Examples:"
+      echo "  ohmobile record my-scene                    # JS in-app simulation"
+      echo "  ohmobile record my-script                   # scripted UI automation (.sh)"
+      echo "  ohmobile record my-scene --duration 20 --setup-delay 8"
       exit 0
     fi
     shift
@@ -145,11 +197,13 @@ case "$CMD" in
     DURATION_FLAG=""
     SETUP_DELAY_FLAG=""
     RUN_DELAY_FLAG=""
+    PRE_DELAY_FLAG=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --duration) DURATION_FLAG="$2"; shift 2 ;;
         --setup-delay) SETUP_DELAY_FLAG="$2"; shift 2 ;;
         --run-delay) RUN_DELAY_FLAG="$2"; shift 2 ;;
+        --pre-delay) PRE_DELAY_FLAG="$2"; shift 2 ;;
         *) shift ;;
       esac
     done
@@ -162,23 +216,23 @@ case "$CMD" in
       echo "${val:-$default}"
     }
 
-    # Find scene file using the same search paths as _list_scenes
-    _find_scene_file() {
-      local scene="$1"
-      for candidate in \
-        "$PROJECT_DIR/src/simulation/scenes" \
-        "$PROJECT_DIR/simulation/scenes" \
-        "$PROJECT_DIR/scenes"; do
-        if [ -f "$candidate/${scene}.js" ]; then
-          echo "$candidate/${scene}.js"
-          return
-        fi
-      done
-      echo ""
-    }
-
     SCENE_FILE=$(_find_scene_file "$SCENE")
-    if [ -n "$SCENE_FILE" ]; then
+
+    # Determine scene type from file extension
+    SCENE_TYPE="js"
+    if [ -n "$SCENE_FILE" ] && [[ "$SCENE_FILE" == *.sh ]]; then
+      SCENE_TYPE="sh"
+    fi
+
+    # Load timing defaults from the scene file
+    if [ "$SCENE_TYPE" = "sh" ] && [ -n "$SCENE_FILE" ]; then
+      # Scripted scene: source to get SCENE_DURATION, SCENE_PRE_DELAY, SCENE_URL
+      # (source in a subshell first to extract variables safely)
+      SCENE_URL=$(bash -c "source '$SCENE_FILE' 2>/dev/null; echo \"\$SCENE_URL\"")
+      DURATION=${DURATION_FLAG:-$(bash -c "source '$SCENE_FILE' 2>/dev/null; echo \"\${SCENE_DURATION:-35}\"")}
+      PRE_DELAY=${PRE_DELAY_FLAG:-$(bash -c "source '$SCENE_FILE' 2>/dev/null; echo \"\${SCENE_PRE_DELAY:-2}\"")}
+    elif [ -n "$SCENE_FILE" ]; then
+      # JS scene
       DURATION=${DURATION_FLAG:-$(_scene_opt "$SCENE_FILE" "duration" "35")}
       SETUP_DELAY=${SETUP_DELAY_FLAG:-$(_scene_opt "$SCENE_FILE" "setupDelay" "6")}
       RUN_DELAY=${RUN_DELAY_FLAG:-$(_scene_opt "$SCENE_FILE" "runDelay" "1")}
@@ -193,46 +247,95 @@ case "$CMD" in
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     OUTPUT="$RECORDINGS_DIR/${SCENE}-${TIMESTAMP}.mov"
 
-    echo "=== Recording: $SCENE ==="
-    echo "  Output:      $OUTPUT"
-    echo "  Duration:    ${DURATION}s"
-    echo "  Setup delay: ${SETUP_DELAY}s"
-    echo "  Run delay:   ${RUN_DELAY}s"
-    echo ""
-
     # Dismiss any system alerts or error overlays before recording
     source "$SCRIPTS_DIR/sim-helpers.sh"
     dismiss_alerts
 
-    # Phase 1: Setup — create entities, navigate to screen, let UI settle
-    echo "  [1/4] Setting up scene..."
-    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=setup"
-    echo "  Waiting ${SETUP_DELAY}s for setup..."
-    sleep "$SETUP_DELAY"
+    if [ "$SCENE_TYPE" = "sh" ]; then
+      # ── Scripted scene (.sh) ─────────────────────────────────────────
+      echo "=== Recording (scripted): $SCENE ==="
+      echo "  Output:    $OUTPUT"
+      echo "  URL:       ${SCENE_URL:-<none>}"
+      echo "  Duration:  ${DURATION}s"
+      echo "  Pre-delay: ${PRE_DELAY:-2}s"
+      echo ""
 
-    # Phase 2: Start recording (UI is settled, plots are visible)
-    echo "  [2/4] Starting recording..."
-    xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
-    RECORD_PID=$!
-    trap "kill -INT $RECORD_PID 2>/dev/null; wait $RECORD_PID 2>/dev/null; echo ''; echo 'Recording saved: $OUTPUT'; exit 0" INT
-    sleep 2  # let recorder initialize
+      # Source the scene file so run_scene() is available
+      source "$SCENE_FILE"
 
-    # Phase 3: Small delay so recording captures the settled state briefly
-    if [ "$RUN_DELAY" -gt 0 ] 2>/dev/null; then
-      echo "  [3/4] Waiting ${RUN_DELAY}s before starting simulation..."
-      sleep "$RUN_DELAY"
+      # Step 1: Open the URL on the simulator
+      if [ -n "$SCENE_URL" ]; then
+        echo "  [1/5] Opening URL..."
+        xcrun simctl openurl "$SIM_NAME" "$SCENE_URL"
+        echo "  Waiting for page to load..."
+        sleep 3
+      fi
+
+      # Step 2: Start screen recording in background
+      echo "  [2/5] Starting recording..."
+      xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
+      RECORD_PID=$!
+      trap "kill -INT $RECORD_PID 2>/dev/null; wait $RECORD_PID 2>/dev/null; echo ''; echo 'Recording saved: $OUTPUT'; exit 0" INT
+      sleep 2  # let recorder initialize
+
+      # Step 3: Pre-delay — capture loaded state before actions start
+      PRE_DELAY="${PRE_DELAY:-2}"
+      if [ "$PRE_DELAY" -gt 0 ] 2>/dev/null; then
+        echo "  [3/5] Pre-delay ${PRE_DELAY}s (capturing loaded state)..."
+        sleep "$PRE_DELAY"
+      fi
+
+      # Step 4: Execute the scene's UI automation
+      echo "  [4/5] Running scene actions..."
+      run_scene
+
+      # Step 5: Hold for remaining duration
+      echo "  [5/5] Holding for ${DURATION}s... (Ctrl+C to stop early)"
+      sleep "$DURATION"
+
+      # Stop recording
+      kill -INT "$RECORD_PID" 2>/dev/null
+      wait "$RECORD_PID" 2>/dev/null
+
+    else
+      # ── JS in-app simulation (.js) ──────────────────────────────────
+      echo "=== Recording: $SCENE ==="
+      echo "  Output:      $OUTPUT"
+      echo "  Duration:    ${DURATION}s"
+      echo "  Setup delay: ${SETUP_DELAY}s"
+      echo "  Run delay:   ${RUN_DELAY}s"
+      echo ""
+
+      # Phase 1: Setup — create entities, navigate to screen, let UI settle
+      echo "  [1/4] Setting up scene..."
+      xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=setup"
+      echo "  Waiting ${SETUP_DELAY}s for setup..."
+      sleep "$SETUP_DELAY"
+
+      # Phase 2: Start recording (UI is settled, plots are visible)
+      echo "  [2/4] Starting recording..."
+      xcrun simctl io "$SIM_NAME" recordVideo --codec h264 "$OUTPUT" &
+      RECORD_PID=$!
+      trap "kill -INT $RECORD_PID 2>/dev/null; wait $RECORD_PID 2>/dev/null; echo ''; echo 'Recording saved: $OUTPUT'; exit 0" INT
+      sleep 2  # let recorder initialize
+
+      # Phase 3: Small delay so recording captures the settled state briefly
+      if [ "$RUN_DELAY" -gt 0 ] 2>/dev/null; then
+        echo "  [3/4] Waiting ${RUN_DELAY}s before starting simulation..."
+        sleep "$RUN_DELAY"
+      fi
+
+      # Phase 4: Run — start the date animation
+      echo "  [4/4] Running simulation..."
+      xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=run"
+
+      echo "  Recording for ${DURATION}s... (Ctrl+C to stop early)"
+      sleep "$DURATION"
+
+      # Stop recording (SIGINT for clean .mov finalization)
+      kill -INT "$RECORD_PID" 2>/dev/null
+      wait "$RECORD_PID" 2>/dev/null
     fi
-
-    # Phase 4: Run — start the date animation
-    echo "  [4/4] Running simulation..."
-    xcrun simctl openurl "$SIM_NAME" "${DEEP_LINK_SCHEME}://simulate?scene=$SCENE&action=run"
-
-    echo "  Recording for ${DURATION}s... (Ctrl+C to stop early)"
-    sleep "$DURATION"
-
-    # Stop recording (SIGINT for clean .mov finalization)
-    kill -INT "$RECORD_PID" 2>/dev/null
-    wait "$RECORD_PID" 2>/dev/null
 
     echo ""
     echo "Recording saved: $OUTPUT"

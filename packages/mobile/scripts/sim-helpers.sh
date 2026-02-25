@@ -207,6 +207,65 @@ dismiss_alerts() {
   fi
 }
 
+# Toggle the software keyboard on the simulator (Cmd+K).
+# Requires Terminal to have Accessibility + Automation permissions.
+toggle_software_keyboard() {
+  osascript \
+    -e 'tell application "Simulator" to activate' \
+    -e 'delay 0.3' \
+    -e 'tell application "System Events" to keystroke "k" using command down'
+}
+
+# Send a keystroke to the simulator via System Events.
+# Usage: send_keystroke "a"              — types the character 'a'
+#        send_keystroke "hello world"    — types the full string
+send_keystroke() {
+  local text="$1"
+  osascript \
+    -e 'tell application "Simulator" to activate' \
+    -e "tell application \"System Events\" to keystroke \"$text\""
+}
+
+# Send a special key (Return, Space, etc.) via key code to the simulator.
+# Common codes: 36=Return, 49=Space, 51=Delete, 53=Escape, 48=Tab
+send_keycode() {
+  local code="$1"
+  osascript \
+    -e 'tell application "Simulator" to activate' \
+    -e "tell application \"System Events\" to key code $code"
+}
+
+# Type text into the focused field (injects text directly, no visible key presses)
+type_text() {
+  local text="$1"
+  local sim_id
+  sim_id=$(get_sim_udid)
+  xcodebuildmcp ui-automation type-text --simulator-id "$sim_id" --text "$text" 2>/dev/null
+}
+
+# Press a key by keycode via xcodebuildmcp (sends to iOS, not macOS)
+press_key() {
+  local key_code="$1"
+  local sim_id
+  sim_id=$(get_sim_udid)
+  xcodebuildmcp ui-automation key-press --simulator-id "$sim_id" --key-code "$key_code" 2>/dev/null
+}
+
+# Tap any element (not just buttons) by label. Returns 0 on success, 1 if not found.
+tap_element() {
+  local label="$1"
+  local coords
+  coords=$(find_element "$label")
+  if [ -n "$coords" ]; then
+    local x=$(echo "$coords" | cut -d' ' -f1)
+    local y=$(echo "$coords" | cut -d' ' -f2)
+    echo "  Tapping '$label' at ($x, $y)"
+    tap "$x" "$y"
+    return 0
+  fi
+  return 1
+}
+
 # List all visible labels on screen (useful for debugging)
 list_ui_elements() {
   local sim_id
